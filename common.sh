@@ -77,3 +77,21 @@ all_pods_in_namespace_for_context_are_running() {
     [ -z "$podsNotRunning" ] && { echo "0" ; return; }
     echo "1"
 }
+
+deployment_in_namespace_for_context_up_and_running() {
+    kubecontext=$1
+    namespace=$2
+    deployment=$3
+
+
+    rv="1"
+    zero=0
+    #TODO troubleshoot --ignore-not-found
+    desiredReplicas=$(kubectl --context ${kubecontext}  get deployment ${deployment} -n ${namespace} -ojsonpath="{.spec.replicas}" --ignore-not-found)
+    readyReplicas=$(kubectl --context ${kubecontext}  get deployment ${deployment} -n ${namespace} -ojsonpath="{.status.readyReplicas}" --ignore-not-found)
+    if [ "${desiredReplicas}" == "${readyReplicas}" ] && [ "${desiredReplicas}" != "${zero}" ]; then
+	    rv="0"
+    fi
+
+    echo ${rv}
+}
