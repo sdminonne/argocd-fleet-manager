@@ -21,14 +21,14 @@ clear
 ################################
 pe "helm --kube-context $(get_client_context_from_cluster_name ${MGMT}) install gitea gitea-charts/gitea  --set service.http.type=LoadBalancer"
 
+# TODO for ariplane mode retrieve image gitea/gitea:1.19.1
+wait_until "pod_in_namespace_for_context_is_running gitea-0 default $(get_client_context_from_cluster_name ${MGMT})" 5 60
+
 #TODO for "airplane mode" retrieve image  docker.io/bitnami/memcached:1.6.19-debian-11-r3
 wait_until "deployment_in_namespace_for_context_up_and_running gitea-memcached default $(get_client_context_from_cluster_name ${MGMT})" 5 60
 
 #TODO for airplane mode retrieve image docker.io/bitnami/postgresql:15.2.0-debian-11-r14
 wait_until "pod_in_namespace_for_context_is_running gitea-postgresql-0 default $(get_client_context_from_cluster_name ${MGMT})" 5 60
-
-# TODO for ariplane mode retrieve image gitea/gitea:1.19.1
-wait_until "pod_in_namespace_for_context_is_running gitea-0 default $(get_client_context_from_cluster_name ${MGMT})" 5 60
 
 GITEAPORT=$(kubectl --context $(get_client_context_from_cluster_name ${MGMT}) get svc gitea-http -o jsonpath='{.spec.ports[0].nodePort}')
 
@@ -45,17 +45,56 @@ curl -u 'gitea_admin:r8sA8CPHD9!bt6d' \
     -X POST  "http://${MGMTIP}:${GITEAPORT}/api/v1/user/repos" \
     -H "Content-Type: application/json" \
     -H "accept: application/json" \
-    -d "{\"name\": \"my-repo\"}" \
+    -d "{\"name\": \"guestbook\", \"private\": false}" \
     -i
 
 cd /tmp
-git init my-repo
-cd /tmp/my-repo
-echo "Hello git" > README.md
-git add /tmp/my-repo/README.md
-git remote add origin http://${MGMTIP}:${GITEAPORT}/gitea_admin/my-repo.git
+git init guestbook
+cd /tmp/guestbook
+
+for mc in "${managedclusters[@]}"; do
+    mkdir -p  /tmp/guestbook/${mc}
+    cat << 'EOF' >  /tmp/guestbook/${mc}/guestbook-ui-deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: guestbook-ui
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app: guestbook-ui
+  template:
+    metadata:
+      labels:
+        app: guestbook-ui
+    spec:
+      containers:
+      - image: gcr.io/heptio-images/ks-guestbook-demo:0.2
+        name: guestbook-ui
+        ports:
+        - containerPort: 80
+EOF
+    git add /tmp/guestbook/${mc}/guestbook-ui-deployment.yaml
+    cat << EOF >  /tmp/guestbook/${mc}/guestbook-ui-svc.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: guestbook-ui
+spec:
+  ports:
+  - port: 80
+    targetPort: 80
+  selector:
+    app: guestbook-ui
+EOF
+    git add /tmp/guestbook/${mc}/guestbook-ui-svc.yaml
+done
+
+git remote add origin http://${MGMTIP}:${GITEAPORT}/gitea_admin/guestbook.git
 git commit -s -a -m 'Ἐν ἀρχῇ ἦν ὁ λόγος'
-git push 'http://gitea_admin:r8sA8CPHD9!bt6d'@${MGMTIP}:${GITEAPORT}/gitea_admin/my-repo.git HEAD
+git push 'http://gitea_admin:r8sA8CPHD9!bt6d'@${MGMTIP}:${GITEAPORT}/gitea_admin/guestbook.git HEAD
 cd -
 
 #################
@@ -82,7 +121,36 @@ done
 
 pe "argocd cluster list"
 
-exit
+
+
+cat <<EOF | kubectl create -f -
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: guestbook
+spec:
+  generators:
+  - list:
+      elements:
+      - cluster: managedclusters[0]
+        url: https://$(minikube -p ${managedclusters[0]} ip):8443
+      - cluster: managedclusters[1]
+        url: https://$(minikube -p ${managedclusters[1]} ip):8443
+  template:
+    metadata:
+      name: '{{cluster}}-guestbook'
+    spec:
+      project: default
+      source:
+        repoURL: https://github.com/argoproj/argo-cd.git
+        targetRevision: HEAD
+        path: applicationset/examples/list-generator/guestbook/{{cluster}}
+      destination:
+        server: '{{url}}'
+        namespace: guestbook
+
+EOF
+
 
 log::info "Let's look at what it installed on ${managedclusters}"
 

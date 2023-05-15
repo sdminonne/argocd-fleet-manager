@@ -79,9 +79,9 @@ all_pods_in_namespace_for_context_are_running() {
 }
 
 deployment_in_namespace_for_context_up_and_running() {
-    kubecontext=$1
+    kubecontext=$3
     namespace=$2
-    deployment=$3
+    deployment=$1
 
 
     rv="1"
