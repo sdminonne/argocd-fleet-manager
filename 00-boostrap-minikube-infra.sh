@@ -60,7 +60,7 @@ do
    echo "Setting up clustername ${CLUSTERNAME}";
    minikube start -p ${CLUSTERNAME};
    wait_until "minikube_up_and_running ${CLUSTERNAME}";
-   [ "${CLUSTERNAME}" == "${MGMT}" ] && { minikube -p "${CLUSTERNAME}" addons enable ingress; };
+#   [ "${CLUSTERNAME}" == "${MGMT}" ] && { minikube -p "${CLUSTERNAME}" addons enable ingress; };
 done
 
 

@@ -33,6 +33,7 @@ get_client_context_from_cluster_name()  {
     esac
 }
 
+
 wait_until() {
   local script=$1
   local wait=${2:-.5}
@@ -48,7 +49,7 @@ wait_until() {
       log::info "${script_pretty_name}: OK"
       return 0
     fi
-    log::warning "${script_pretty_name}: Waiting... ${wait} seconds"
+    log::warning "${script_pretty_name}: Waiting... Timeout in $((timeout-(i*wait))) seconds"
     sleep $wait
   done
   log::error "${script_pretty_name}"
@@ -94,4 +95,16 @@ deployment_in_namespace_for_context_up_and_running() {
     fi
 
     echo ${rv}
+}
+
+
+http_endpoint_is_up()  {
+  httpendpoint=$1
+  httpstatus=$(curl  -I  ${httpendpoint} 2>/dev/null | head -n 1 | cut -d$' ' -f2)
+  if [[ "${httpstatus}" == "200" ]]
+  then
+    echo "0"
+    return
+  fi
+  echo "1"
 }
