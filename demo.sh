@@ -140,12 +140,6 @@ pe "argocd cluster list"
 #####################################
 # Now load the applications
 #####################################
-for mc in "${managedclusters[@]}"; do
-    pe "kubectl --context $(get_client_context_from_cluster_name ${mc}) create ns guestbook"
-done
-
-
-
 cat <<EOF | kubectl --context $(get_client_context_from_cluster_name ${MGMT}) apply -f -
 apiVersion: argoproj.io/v1alpha1
 kind: ApplicationSet
@@ -164,6 +158,12 @@ spec:
       name: '{{cluster}}-guestbook'
     spec:
       project: default
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=true
       source:
         repoURL: http://${MGMTIP}:${GITEAPORT}/gitea_admin/guestbook.git
         targetRevision: HEAD
@@ -176,12 +176,6 @@ spec:
 
 EOF
 
-
-#log::info "Let's look at what it installed on ${managedclusters}"
-#pe "kubectl --context ${managedclusters} get sa  argocd-manager -n kube-system -o yaml"
-#pe "kubectl --context ${managedclusters} get clusterrolebinding argocd-manager-role-binding -o yaml"
-#pe "kubectl --context ${managedclusters} get clusterrole argocd-manager-role"
-
 #####################################
 # Now sync the applications
 #####################################
@@ -189,7 +183,7 @@ for mc in "${managedclusters[@]}"; do
     pe "argocd app sync ${mc}-guestbook"
 done
 
-#kubectl get secret cluster-192.168.50.40-2497131181 -o jsonpath='{.data.config}'  | base64 -d | jq -r > $(mktemp -t ${managedclusters}.XXXX.auth)
-#kubectl get secret cluster-192.168.50.40-2497131181 -o jsonpath='{.data.config}'  | base64 -d | jq -r > $(mktemp -t ${managedclusters}.XXXX.auth)
+
+pe "kubectl get apps"
 
 exit
