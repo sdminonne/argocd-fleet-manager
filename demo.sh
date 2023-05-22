@@ -4,11 +4,9 @@
 
 . common.sh
 
-#kubectl config use-context  $(get_client_context_from_cluster_name ${MGMT})
-
-#TODO add checks for MGMT and managedclusters
 
 command -v kubectl >/dev/null 2>&1 || { log::error >&2 "can't find kubectl.  Aborting."; exit 1; }
+
 #check pre-requisities: TODO check version
 command -v argocd >/dev/null 2>&1 || { log::error >&2 "can't find argocd. Aborting."; exit 1; }
 
@@ -82,7 +80,7 @@ spec:
         app: guestbook-ui
     spec:
       containers:
-      - image: gcr.io/heptio-images/ks-guestbook-demo:0.2
+      - image: gcr.io/heptio-images/ks-guestbook-demo:0.1
         name: guestbook-ui
         ports:
         - containerPort: 80
@@ -108,7 +106,7 @@ git commit -s -a -m 'Ἐν ἀρχῇ ἦν ὁ λόγος'
 git push 'http://gitea_admin:r8sA8CPHD9!bt6d'@${MGMTIP}:${GITEAPORT}/gitea_admin/guestbook.git HEAD
 cd -
 
-log::info "GIT repo http://gitea_admin:r8sA8CPHD9!bt6d'@${MGMTIP}:${GITEAPORT}/gitea_admin/guestbook.git created"
+log::info "GIT repo http://${MGMTIP}:${GITEAPORT}/gitea_admin/guestbook.git created"
 
 
 
