@@ -108,3 +108,16 @@ http_endpoint_is_up()  {
   fi
   echo "1"
 }
+
+crd_defined_for_context() {
+    crd=$1
+    context=$2
+    kubectl --context ${context} get crd ${crd} &>/dev/null
+    if [[ $? -ne 0 ]]
+    then
+        echo "1"
+    else
+        echo "0"
+    fi
+    return
+}

@@ -85,7 +85,8 @@ done
 log::info "Restaring minikube(s)"
 for CLUSTERNAME in "${clusters[@]}"
 do
-   minikube start -p ${CLUSTERNAME};
+    minikube start -p ${CLUSTERNAME};
+    minikube -p ${CLUSTERNAME} addons enable ingress
    wait_until "minikube_up_and_running ${CLUSTERNAME}"
 done
 
