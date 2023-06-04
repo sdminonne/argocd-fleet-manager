@@ -9,3 +9,5 @@
 kubeconfig.*
 kubeconfig
 trashcan/
+mini-ca/root/
+mini-ca/intermediate

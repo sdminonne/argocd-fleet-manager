@@ -10,18 +10,11 @@ command -v kubectl >/dev/null 2>&1 || { log::error >&2 "can't find kubectl.  Abo
 #check pre-requisities: TODO check version
 command -v argocd >/dev/null 2>&1 || { log::error >&2 "can't find argocd. Aborting."; exit 1; }
 
-
 command -v helm >/dev/null 2>&1 || { log::error >&2 "can't find helm. Aborting."; exit 1; }
-
 
 command -v curl >/dev/null 2>&1 || { log::error >&2 "can't find curl. Aborting."; exit 1; }
 
-MGMTIP=$(minikube -p "${MGMT}" ip)
-MGMTURL=https://${MGMTIP}:8443
-
 clear
-
-
 
 #################
 # Install ArgoCD
@@ -34,23 +27,11 @@ wait_until "all_pods_in_namespace_for_context_are_running argocd $(get_client_co
 pe "kubectl config use-context  $(get_client_context_from_cluster_name ${MGMT})"
 pe "kubectl config set-context --current --namespace=argocd"
 
-pe "argocd cluster list"
-
-########################
-# Add clusters to argo
-#######################
-for mc in "${managedclusters[@]}"; do
-    pe "kubectl --context $(get_client_context_from_cluster_name ${mc}) config view --minify --flatten > ${mc}.kubeconfig"
-    pe "argocd cluster add ${mc} --kubeconfig= ${mc}.kubeconfig -y"
-done
-
-pe "argocd cluster list"
-
-
-
-#####################################
+##########################################################
 # Creates ingress-nginx on clusters
-####################################
+# Commented out for minikube since in minikube is available
+# native as addon
+###########################################################
 #cat <<EOF | kubectl --context $(get_client_context_from_cluster_name ${MGMT}) apply -n argocd -f -
 #apiVersion: argoproj.io/v1alpha1
 #kind: ApplicationSet
@@ -90,9 +71,27 @@ pe "argocd cluster list"
 
 
 
-#######################
-# Deploy cert-manager
-#######################
+#############################################################
+# Deploy cert-manager as Argo application to ${MGMT} cluster
+#############################################################
+log::info "deploying cert-manager"
+cat <<EOF | kubectl --context $(get_client_context_from_cluster_name ${MGMT}) apply  -f -
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: default
+  namespace: argocd
+spec:
+  sourceRepos:
+    - '*'
+  destinations:
+    - namespace: '*'
+      server: '*'
+  clusterResourceWhitelist:
+    - group: '*'
+      kind: '*'
+EOF
+
 
 cat <<EOF | kubectl --context $(get_client_context_from_cluster_name ${MGMT}) apply  -f -
 apiVersion: argoproj.io/v1alpha1
@@ -119,7 +118,8 @@ spec:
       - CreateNamespace=true
 EOF
 
-
+log::info "waiting for cert-manager to install..."
+sleep 10
 wait_until "crd_defined_for_context certificates.cert-manager.io $(get_client_context_from_cluster_name ${MGMT})" 10 120
 wait_until "crd_defined_for_context issuers.cert-manager.io $(get_client_context_from_cluster_name ${MGMT})" 10 120
 wait_until "all_pods_in_namespace_for_context_are_running cert-manager  $(get_client_context_from_cluster_name ${MGMT})" 10 120
@@ -128,6 +128,7 @@ wait_until "all_pods_in_namespace_for_context_are_running cert-manager  $(get_cl
 ##################################
 # Deploy self-signed  cert issuer
 ##################################
+log::info "Creating cert-manager Issuer"
 cat <<EOF | kubectl --context $(get_client_context_from_cluster_name ${MGMT}) apply  -f -
 apiVersion: cert-manager.io/v1
 kind: Issuer
@@ -141,7 +142,9 @@ EOF
 #################
 # generate certs
 #################
+log::info "Creating certificate CR for cert-manager"
 for mc in "${managedclusters[@]}"; do
+    log::info "Creating ${mc}-cert} CR certificates.cert-manager.io"
     cat <<EOF | kubectl --context $(get_client_context_from_cluster_name ${MGMT}) apply  -f -
 apiVersion: cert-manager.io/v1
 kind: Certificate
@@ -150,14 +153,11 @@ metadata:
   namespace: cert-manager
 spec:
   secretName: ${mc}-tls
-  secretTemplate:
-    annotations:
-      cluster-url: $(minikube -p ${mc} ip)
-    labels:
-      cluster: ${mc}
   duration: 24h
   renewBefore: 12h
   secretTemplate:
+    annotations:
+      syncrets-namespace: guestbook
     labels:
       cluster: ${mc}
   commonName: ${mc}
@@ -205,6 +205,7 @@ wait_until "deployment_in_namespace_for_context_up_and_running gitea-memcached d
 #TODO for airplane mode retrieve image docker.io/bitnami/postgresql:15.2.0-debian-11-r14
 wait_until "pod_in_namespace_for_context_is_running gitea-postgresql-0 default $(get_client_context_from_cluster_name ${MGMT})" 10 120
 
+MGMTIP=$(minikube -p "${MGMT}" ip)
 
 #patch the gitea svc on ${MGMT} cluster with the minikube IP address
 kubectl --context $(get_client_context_from_cluster_name ${MGMT}) -n default patch svc gitea-http -p "{\"spec\":{\"externalIPs\":[\"${MGMTIP}\"]}}"
@@ -214,6 +215,19 @@ GITEAPORT=$(kubectl --context $(get_client_context_from_cluster_name ${MGMT}) -n
 
 #check when/if svc is available
 wait_until "http_endpoint_is_up http://${MGMTIP}:${GITEAPORT}" 10 120
+
+
+########################
+# Add clusters to argo
+#######################
+pe "argocd --core=true cluster list"
+
+for mc in "${managedclusters[@]}"; do
+    pe "kubectl --context $(get_client_context_from_cluster_name ${mc}) config view --minify --flatten > ${mc}.kubeconfig"
+    pe "argocd --core=true cluster add ${mc} --kubeconfig= ${mc}.kubeconfig -y"
+done
+
+pe "argocd --core=true cluster list"
 
 
 
@@ -228,7 +242,6 @@ curl -u 'gitea_admin:r8sA8CPHD9!bt6d' \
     -d "{\"name\": \"guestbook\", \"private\": false}" \
     -i
 #TODO check $?
-
 
 GUESTBOOKTMP=$(mktemp -d)/guestbook
 git init ${GUESTBOOKTMP}
@@ -290,7 +303,7 @@ spec:
                 number: 80
     tls:
     - hosts:
-      - $(minikube -p cluster1 ip)
+      - $(minikube -p ${mc} ip)
       secretName: ${mc}-tls
 EOF
     git add ${GUESTBOOKTMP}/${mc}/guestbook-ingress.yaml
