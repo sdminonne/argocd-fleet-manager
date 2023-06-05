@@ -15,11 +15,12 @@
 
 [ -s "${INTERMEDIATE}/crlnumber.txt" ] && (log::warning "${INTERMEDIATE}/crlnumber.txt already exists" ) || echo 01 > "${INTERMEDIATE}/crlnumber.txt"
 
-log::info "creating intermediate key pair"
+log::info "Making intermediate key pair"
 
-[[ -f "${INTERMEDIATE}/private/intermediate_keypair.pem" ]] || openssl genpkey \
-                                                      -algorithm ED448 \
-                                                      -out ${INTERMEDIATE}/private/intermediate_keypair.pem
+[ -s  "${INTERMEDIATE}/private/intermediate_keypair.pem" ] && ( log::warning "${INTERMEDIATE}/private/intermediate_keypair.pem already exists" ) || \ 
+    openssl genpkey \
+    -algorithm rsa \
+    -out ${INTERMEDIATE}/private/intermediate_keypair.pem
 
 TMPINTERMEDIATECNF=$(mktemp -t intermediate.XXXX.cnf)
 cat << EOF > ${TMPINTERMEDIATECNF}
@@ -119,26 +120,27 @@ if [ ! -s ${INTERMEDIATE}/intermediate.cnf ]
 then
    mv ${TMPINTERMEDIATECNF} ${INTERMEDIATE}/intermediate.cnf
 else
-    cmp -s ${TMPINTERMEDIATECNF} ${INTERMEDIATE}/intermediate.cnf || { echo "${INTERMEDIATE}/intermediate.cnf already present but different please compare with ${TMPINTERMEDIATECNF}"; exit 1; }
+    cmp -s ${TMPINTERMEDIATECNF} ${INTERMEDIATE}/intermediate.cnf || \
+    { echo "${INTERMEDIATE}/intermediate.cnf already present but different please compare with ${TMPINTERMEDIATECNF}"; exit 1; }
 fi
-
 [ -s ${INTERMEDIATE}/intermediate.cnf ] || echo "empty or no intermediate.cnf file"
 
-log::info "Generating the intermediate CA CSR"
-openssl req \
-        -config ${INTERMEDIATE}/intermediate.cnf \
+log::info "Generating the intermediate CA CSR: ${INTERMEDIATE}/intermediate_csr.pem"
+[ -s  "${INTERMEDIATE}/intermediate_csr.pem" ] && ( log::warning "${INTERMEDIATE}/intermediate_csr.pem  already exists" ) ||  \
+    openssl req \
+        -config "${INTERMEDIATE}/intermediate.cnf" \
         -new \
-        -key ${INTERMEDIATE}/private/intermediate_keypair.pem \
-        -out ${INTERMEDIATE}/intermediate_csr.pem \
+        -key "${INTERMEDIATE}/private/intermediate_keypair.pem" \
+        -out "${INTERMEDIATE}/intermediate_csr.pem" \
         -text
 
 
-log::info "Issuing intermediate CA certificate"
-openssl ca \
-    -config ${ROOT}/root.cnf \
+log::info "Issuing intermediate CA certificate: ${INTERMEDIATE}/intermediate_cert.pem"
+[ -s  "${INTERMEDIATE}/intermediate_cert.pem" ] && ( log::warning "${INTERMEDIATE}/intermediate_cert.pem already exists" ) || openssl ca \
+    -config "${ROOT}/root.cnf" \
     -batch \
     -extensions v3_intermediate_cert \
-    -in  ${INTERMEDIATE}/intermediate_csr.pem \
-    -out ${INTERMEDIATE}/intermediate_cert.pem
+    -in  "${INTERMEDIATE}/intermediate_csr.pem" \
+    -out "${INTERMEDIATE}/intermediate_cert.pem"
 
 log::info "Intermediate CA  ${INTERMEDIATE}/intermediate_cert.pem looks OK"

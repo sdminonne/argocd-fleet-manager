@@ -128,16 +128,33 @@ wait_until "all_pods_in_namespace_for_context_are_running cert-manager  $(get_cl
 ##################################
 # Deploy self-signed  cert issuer
 ##################################
+log::info "Crate cert-manager CA issuer"
+kubectl --context $(get_client_context_from_cluster_name ${MGMT}) -n cert-manager create secret tls ca-key-pair \
+  --key="./mini-ca/intermediate/private/intermediate_keypair.pem" \
+  --cert="./mini-ca/intermediate/intermediate_cert.pem"
+
 log::info "Creating cert-manager Issuer"
 cat <<EOF | kubectl --context $(get_client_context_from_cluster_name ${MGMT}) apply  -f -
 apiVersion: cert-manager.io/v1
 kind: Issuer
 metadata:
-  name: selfsigned-issuer
+  name: ca-issuer
   namespace: cert-manager
 spec:
-  selfSigned: {}
+  ca:
+    secretName: ca-key-pair
 EOF
+
+#log::info "Creating cert-manager Issuer"
+#cat <<EOF | kubectl --context $(get_client_context_from_cluster_name ${MGMT}) apply  -f -
+#apiVersion: cert-manager.io/v1
+#kind: Issuer
+#metadata:
+#  name: selfsigned-issuer
+#  namespace: cert-manager
+#spec:
+#  selfSigned: {}
+#EOF
 
 #################
 # generate certs
@@ -172,7 +189,7 @@ spec:
   ipAddresses:
     - $(minikube -p ${mc} ip)
   issuerRef:
-    name: selfsigned-issuer
+    name: ca-issuer
     kind: Issuer
     group: cert-manager.io
 EOF
