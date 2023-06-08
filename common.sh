@@ -2,7 +2,9 @@
 
 MGMT=mgmt
 
-declare -a managedclusters=("cluster1" "cluster2")
+#declare -a managedclusters=("cluster1" "cluster2")
+declare -a managedclusters=("cluster1")
+
 declare -a clusters=("${MGMT}" "${managedclusters[@]}")
 
 #Log in RED

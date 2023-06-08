@@ -87,7 +87,13 @@ for CLUSTERNAME in "${clusters[@]}"
 do
     minikube start -p ${CLUSTERNAME};
     minikube -p ${CLUSTERNAME} addons enable ingress
+#    minikube -p ${CLUSTERNAME} addons enable ingress-dns
    wait_until "minikube_up_and_running ${CLUSTERNAME}"
+done
+
+
+for c in $(minikube profile list -o json | jq -r .valid[].Name);
+do echo $(minikube -p $c ip) ${c} | sudo tee -a /etc/hosts
 done
 
 

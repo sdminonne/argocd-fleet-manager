@@ -184,8 +184,8 @@ spec:
     organizationalUnits:
       - argo
   privateKey:
-    algorithm: ECDSA
-    size: 256
+    algorithm: RSA
+    size: 2048
   ipAddresses:
     - $(minikube -p ${mc} ip)
   issuerRef:
@@ -309,7 +309,8 @@ metadata:
     name: guestbookl-ingress
 spec:
     rules:
-    - http:
+    - host: ${mc}
+      http:
         paths:
         - path: /
           pathType: Prefix
@@ -320,7 +321,7 @@ spec:
                 number: 80
     tls:
     - hosts:
-      - $(minikube -p ${mc} ip)
+      - ${mc}
       secretName: ${mc}-tls
 EOF
     git add ${GUESTBOOKTMP}/${mc}/guestbook-ingress.yaml
@@ -337,7 +338,6 @@ log::info "GIT repo http://${MGMTIP}:${GITEAPORT}/gitea_admin/guestbook.git crea
 #####################################
 # Now load the applications
 #####################################
-#TODO: adds the certificates
 cat <<EOF | kubectl --context $(get_client_context_from_cluster_name ${MGMT}) apply -f -
 apiVersion: argoproj.io/v1alpha1
 kind: ApplicationSet
@@ -349,8 +349,6 @@ spec:
       elements:
       - cluster: ${managedclusters[0]}
         url: https://$(minikube -p ${managedclusters[0]} ip):8443
-      - cluster: ${managedclusters[1]}
-        url: https://$(minikube -p ${managedclusters[1]} ip):8443
   template:
     metadata:
       name: '{{cluster}}-guestbook'
