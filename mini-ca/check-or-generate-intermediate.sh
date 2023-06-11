@@ -17,10 +17,10 @@
 
 log::info "Making intermediate key pair"
 
-[ -s  "${INTERMEDIATE}/private/intermediate_keypair.pem" ] && ( log::warning "${INTERMEDIATE}/private/intermediate_keypair.pem already exists" ) || \ 
+[ -s  "${INTERMEDIATE}/private/${INTERMEDIATEPRIVATEKEY}" ] && ( log::warning "${INTERMEDIATE}/private/${INTERMEDIATEPRIVATEKEY} already exists" ) || \
     openssl genpkey \
     -algorithm rsa \
-    -out ${INTERMEDIATE}/private/intermediate_keypair.pem
+    -out ${INTERMEDIATE}/private/${INTERMEDIATEPRIVATEKEY}
 
 TMPINTERMEDIATECNF=$(mktemp -t intermediate.XXXX.cnf)
 cat << EOF > ${TMPINTERMEDIATECNF}
@@ -31,8 +31,8 @@ default_ca = CA_default
 database                = ${INTERMEDIATE}/index.txt
 new_certs_dir           = ${INTERMEDIATE}/issued
 
-certificate             = ${INTERMEDIATE}/intermediate_cert.pem
-private_key             = ${INTERMEDIATE}/private/intermediate_keypair.pem
+certificate             = ${INTERMEDIATE}/${INTERMEDIATECERTPEM}
+private_key             = ${INTERMEDIATE}/private/${INTERMEDIATEPRIVATEKEY}
 
 default_days            = 365
 default_md              = default
@@ -55,10 +55,11 @@ prompt                  = no
 distinguished_name      = distinguished_name_intermediate_cert
 
 [distinguished_name_intermediate_cert]
-countryName             = FR
-stateOrProvinceName     = Tourrettes sur Loup
-localityName            = Tourrettes sur Loup
-organizationName        = Minonne Family
+countryName             = NA
+stateOrProvinceName     = North Argota
+localityName            = ArgoBurg
+organizationName        = Argo FM
+organizationalUnitName	= argo
 commonName              = Intermediate CA
 
 [policy_server_cert]
@@ -130,17 +131,17 @@ log::info "Generating the intermediate CA CSR: ${INTERMEDIATE}/intermediate_csr.
     openssl req \
         -config "${INTERMEDIATE}/intermediate.cnf" \
         -new \
-        -key "${INTERMEDIATE}/private/intermediate_keypair.pem" \
+        -key "${INTERMEDIATE}/private/${INTERMEDIATEPRIVATEKEY}" \
         -out "${INTERMEDIATE}/intermediate_csr.pem" \
         -text
 
 
-log::info "Issuing intermediate CA certificate: ${INTERMEDIATE}/intermediate_cert.pem"
-[ -s  "${INTERMEDIATE}/intermediate_cert.pem" ] && ( log::warning "${INTERMEDIATE}/intermediate_cert.pem already exists" ) || openssl ca \
+log::info "Issuing intermediate CA certificate: ${INTERMEDIATE}/${INTERMEDIATECERTPEM}"
+[ -s  "${INTERMEDIATE}/${INTERMEDIATECERTPEM}" ] && ( log::warning "${INTERMEDIATE}/${INTERMEDIATECERTPEM} already exists" ) || openssl ca \
     -config "${ROOT}/root.cnf" \
     -batch \
     -extensions v3_intermediate_cert \
     -in  "${INTERMEDIATE}/intermediate_csr.pem" \
-    -out "${INTERMEDIATE}/intermediate_cert.pem"
+    -out "${INTERMEDIATE}/${INTERMEDIATECERTPEM}"
 
-log::info "Intermediate CA  ${INTERMEDIATE}/intermediate_cert.pem looks OK"
+log::info "Intermediate CA  ${INTERMEDIATE}/${INTERMEDIATECERTPEM} looks OK"

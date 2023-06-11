@@ -23,12 +23,12 @@ log::info "Ensuring ${PRIVATE} folder exists"
 [ "$(stat -L -c "%a" ${PRIVATE})" == "700" ] || chmod 0700 ${PRIVATE}
 
 #make root keypair
-log::info "Making root key pair: ${PRIVATE}/root_keypair.pem"
-[ -s  "${PRIVATE}/root_keypair.pem" ] && ( log::warning "${PRIVATE}/root_keypair.pem already exists" ) ||  openssl genpkey \
-                                         -algorithm ED448 \
-                                         -out "${PRIVATE}/root_keypair.pem"
-[ -s  ${PRIVATE}/root_keypair.pem ] || { log::error "ERROR: empty or no private key"; exit; }
-log::info "${PRIVATE}/root_keypair.pem looks OK"
+log::info "Making root key pair: ${PRIVATE}/${ROOTPRIVATEKEY}"
+[ -s  "${PRIVATE}/${ROOTPRIVATEKEY}" ] && ( log::warning "${PRIVATE}/${ROOTPRIVATEKEY} already exists" ) ||  openssl genpkey \
+                                         -algorithm rsa \
+                                         -out "${PRIVATE}/${ROOTPRIVATEKEY}"
+[ -s  ${PRIVATE}/${ROOTPRIVATEKEY} ] || { log::error "ERROR: empty or no private key"; exit; }
+log::info "${PRIVATE}/${ROOTPRIVATEKEY} looks OK"
 
 TMPROOTCNF=$(mktemp -t root.XXXXX.cnf)
 cat << EOF > "${TMPROOTCNF}"
@@ -39,8 +39,8 @@ default_ca = CA_default
 database                = ${ROOT}/index.txt
 new_certs_dir           = ${ROOT}/issued
 
-certificate             = ${ROOT}/root_cert.pem
-private_key             = ${PRIVATE}/root_keypair.pem
+certificate             = ${ROOT}/${ROOTCERTPEM}
+private_key             = ${PRIVATE}/${ROOTPRIVATEKEY}
 
 default_days            = 3650
 default_md              = default
@@ -63,10 +63,11 @@ prompt                  = no
 distinguished_name      = distinguished_name_root_cert
 
 [distinguished_name_root_cert]
-countryName             = FR
-stateOrProvinceName     = Tourrettes sur Loup
-localityName            = Tourrettes sur Loup
-organizationName        = Minonne Family
+countryName             = NA
+stateOrProvinceName     = North Argota
+localityName            = ArgoBurg
+organizationName        = Argo FM
+organizationalUnitName	= argo
 commonName              = Root CA
 
 [policy_intermediate_cert]
@@ -112,21 +113,21 @@ log::info "Making root CSR ${ROOT}/root_csr.pem "
     openssl req \
     -config ${ROOT}/root.cnf \
     -new \
-    -key "${PRIVATE}/root_keypair.pem" \
+    -key "${PRIVATE}/${ROOTPRIVATEKEY}" \
     -out "${ROOT}/root_csr.pem" \
     -text
 
 [ -s  ${ROOT}/root_csr.pem ] ||  { log::error "empty or no root CSR"; exit 1; }
 
-log::info "Making root CERT ${ROOT}/root_cert.pem"
-[ -s  "${ROOT}/root_cert.pem" ] && ( log::warning "${ROOT}/root_cert.pem already exists" ) || openssl ca \
+log::info "Making root CERT ${ROOT}/${ROOTCERTPEM}"
+[ -s  "${ROOT}/${ROOTCERTPEM}" ] && ( log::warning "${ROOT}/${ROOTCERTPEM} already exists" ) || openssl ca \
                                          -config "${ROOT}/root.cnf" \
                                          -extensions v3_root_cert \
                                          -selfsign \
                                          -batch \
                                          -in "${ROOT}/root_csr.pem" \
-                                         -out "${ROOT}/root_cert.pem"
+                                         -out "${ROOT}/${ROOTCERTPEM}"
 
-[ -s  ${ROOT}/root_cert.pem ] || { log::error "ERROR: empty or no root CSR"; exit 1; }
+[ -s  ${ROOT}/${ROOTCERTPEM} ] || { log::error "ERROR: empty or no root CSR"; exit 1; }
 
-log::info "Root CA ${ROOT}/root_cert.pem looks OK"
+log::info "Root CA ${ROOT}/${ROOTCERTPEM} looks OK"

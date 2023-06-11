@@ -130,8 +130,8 @@ wait_until "all_pods_in_namespace_for_context_are_running cert-manager  $(get_cl
 ##################################
 log::info "Crate cert-manager CA issuer"
 kubectl --context $(get_client_context_from_cluster_name ${MGMT}) -n cert-manager create secret tls ca-key-pair \
-  --key="./mini-ca/intermediate/private/intermediate_keypair.pem" \
-  --cert="./mini-ca/intermediate/intermediate_cert.pem"
+  --key="./mini-ca/intermediate/private/argo_intermediate_private_key.pem" \
+  --cert="./mini-ca/intermediate/argo_intermediate_cert.pem"
 
 log::info "Creating cert-manager Issuer"
 cat <<EOF | kubectl --context $(get_client_context_from_cluster_name ${MGMT}) apply  -f -
@@ -186,6 +186,10 @@ spec:
   privateKey:
     algorithm: RSA
     size: 2048
+  usages:
+    - server auth
+  dnsNames:
+    - ${mc}
   ipAddresses:
     - $(minikube -p ${mc} ip)
   issuerRef:

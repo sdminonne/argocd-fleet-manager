@@ -10,10 +10,10 @@ $ ./check-or-generate-intermediate.sh
 ```
 
 
-Now let's add the intermediate cert as a trusted certificate authority. 
+Now let's add the intermediate cert as a trusted certificate authority.
 
 ``` shell
-$ sudo cp intermediate/intermediate_cert.pem /etc/pki/ca-trust/source/anchors/intermediate_cert.pem
+$ sudo cp root/argo_root_cert.pem /etc/pki/ca-trust/source/anchors/argo_root_cert.pem
 ```
 
 ```shell
@@ -66,7 +66,7 @@ openssl ca \
     -batch \
     -config ./intermediate/intermediate.cnf \
     -in  ./localhost-csr.pem \
-    -out ./localhost-cert.pem 
+    -out ./localhost-cert.pem
 ```
 
 
@@ -84,10 +84,10 @@ $ curl https://localhost:5000
 
 
 
-To remove the intermediate CA
+To remove the root CA
 
 `` shell
-$ sudo rm /etc/pki/ca-trust/source/anchors/intermediate_cert.pem
+$ sudo rm /etc/pki/ca-trust/source/anchors/argo_root_cert.pem
 ```
 
 ```shell
