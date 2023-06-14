@@ -60,7 +60,12 @@ do
    echo "Setting up clustername ${CLUSTERNAME}";
    minikube start -p ${CLUSTERNAME};
    wait_until "minikube_up_and_running ${CLUSTERNAME}";
-#   [ "${CLUSTERNAME}" == "${MGMT}" ] && { minikube -p "${CLUSTERNAME}" addons enable ingress; };
+done
+
+for CLUSTERNAME in "${clusters[@]}"
+do
+  echo "Pushing images... To  ${CLUSTERNAME}"
+  minikube -p ${CLUSTERNAME} image load ./images/nginx-controller.tar;
 done
 
 
@@ -83,13 +88,16 @@ do
 done
 
 log::info "Restaring minikube(s)"
-for CLUSTERNAME in "${clusters[@]}"
+for CLUSTERNAME in "${managedclusters[@]}"
 do
     minikube start -p ${CLUSTERNAME};
     minikube -p ${CLUSTERNAME} addons enable ingress
-#    minikube -p ${CLUSTERNAME} addons enable ingress-dns
-   wait_until "minikube_up_and_running ${CLUSTERNAME}"
+    wait_until "minikube_up_and_running ${CLUSTERNAME}"
 done
+
+#now starts the mgmt control plane
+minikube start -p ${MGMT}
+wait_until "minikube_up_and_running ${MGMT}"
 
 
 for c in $(minikube profile list -o json | jq -r .valid[].Name);
