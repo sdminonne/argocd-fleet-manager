@@ -60,7 +60,7 @@ GITEAUSERNAME='gitea_admin'
 GITEAPASSWORD='r8sA8CPHD9!bt6d'
 GITEANS=gitea
 
-log::info "Creating a GIT repository on ${MGMT} cluster using helm charts for GITEA see https://gitea.io/en-us"
+log::info "Creating a GIT server on ${MGMT} cluster using helm charts for GITEA see https://gitea.io/en-us"
 pe "helm --kube-context $(get_client_context_from_cluster_name ${MGMT}) install gitea gitea-charts/gitea  --namespace ${GITEANS} --create-namespace"
 log::info "Adding ingress to gitea (cert-manager generates the certificate)"
 cat <<EOF | kubectl --context $(get_client_context_from_cluster_name ${MGMT}) -n ${GITEANS} apply  -f -
@@ -104,7 +104,7 @@ wait_until "pod_in_namespace_for_context_is_running gitea-postgresql-0 ${GITEANS
 #check when/if svc is available
 wait_until "https_endpoint_is_up https://my-git.io" 10 120
 
-log::info "OK you can find git repository at https://my-git.io"
+log::info "OK you can find git server at https://my-git.io"
 log::info "Gitea user: ${GITEAUSERNAME}"
 log::info "Gitea password: ${GITEAPASSWORD}"
 
@@ -116,7 +116,7 @@ log::info "Gitea password: ${GITEAPASSWORD}"
 
 
 # 1. Installing the workload
-log::info "Install ArgoCD"
+log::info "Installing ArgoCD"
 pe "kubectl --context $(get_client_context_from_cluster_name ${MGMT}) create namespace argocd"
 pe "kubectl --context $(get_client_context_from_cluster_name ${MGMT}) apply -n argocd -f manifests/argocd/" # we install only Argo Core
 wait_until "all_pods_in_namespace_for_context_are_running argocd $(get_client_context_from_cluster_name ${MGMT})" 10 120
@@ -157,20 +157,20 @@ pe "argocd --core=true cluster list"
 #########################################
 # Create secret to deploy apps and appset
 #########################################
-cat <<EOF | kubectl --context $(get_client_context_from_cluster_name ${MGMT}) apply  -f -
-apiVersion: argoproj.io/v1alpha1
-apiVersion: v1
-kind: Secret
-metadata:
-  name: in-cluster
-  labels:
-    app.kubernetes.io/part-of: argocd
-    argocd.argoproj.io/secret-type: cluster
-    cluster-type: management
-type: Opaque
-stringData:
-  server: https://kubernetes.default.svc
-EOF
+#cat <<EOF | kubectl --context $(get_client_context_from_cluster_name ${MGMT}) apply  -f -
+#apiVersion: argoproj.io/v1alpha1
+#apiVersion: v1
+#kind: Secret
+#metadata:
+#  name: in-cluster
+#  labels:
+#    app.kubernetes.io/part-of: argocd
+#    argocd.argoproj.io/secret-type: cluster
+#    cluster-type: management
+#type: Opaque
+#stringData:
+#  server: https://kubernetes.default.svc
+#EOF
 
 
 
@@ -178,8 +178,9 @@ EOF
 # Deploy syncrets
 #################
 log::info "Deploying syncrets"
-SYNCRETSDIR=$(mktemp -d /tmp/syncrets.XXXX)
-git clone https://github.com/sdminonne/syncrets.git ${SYNCRETSDIR}
+#SYNCRETSDIR=$(mktemp -d /tmp/syncrets.XXXX)
+#git clone https://github.com/sdminonne/syncrets.git ${SYNCRETSDIR}
+SYNCRETSDIR=~/dev/sdminonne/syncrets/src/github.com/sdminonne/syncrets/
 pushd ${SYNCRETSDIR}
 make build
 make image
@@ -200,13 +201,19 @@ curl  -u 'gitea_admin:r8sA8CPHD9!bt6d' \
 CLUSTERADDONSTMP=$(mktemp -d)/clusteraddons
 mkdir -p ${CLUSTERADDONSTMP}
 git init ${CLUSTERADDONSTMP}
-pe "cp  -r ${ROOTDIR}/manifests/helm-ingress/ ${CLUSTERADDONSTMP}"
+pe "cp  -r ${ROOTDIR}/manifests/guestbook-ingress// ${CLUSTERADDONSTMP}"
 pushd ${CLUSTERADDONSTMP}
 git remote add origin 'https://gitea_admin:r8sA8CPHD9!bt6d'@my-git.io/gitea_admin/clusteraddons.git
-pe "git add ${CLUSTERADDONSTMP}/helm-ingress"
-pe "git commit -s -a -m 'To add helm-ingress'"
+pe "git add ${CLUSTERADDONSTMP}/guestbook-ingress"
+pe "git commit -s -a -m 'To add guestbook-ingress'"
 git push 'https://gitea_admin:r8sA8CPHD9!bt6d'@my-git.io/gitea_admin/clusteraddons.git HEAD
 popd
+
+###########################################################################
+# Adds repo to argocd to trust  https://my-git.io/gitea_admin/clusteraddons
+###########################################################################
+pe "argocd repo add  --insecure-skip-server-verification https://my-git.io/gitea_admin/clusteraddons.git"
+
 
 ########################################################
 # Deploy the remote ingress to host transfer certiicates
@@ -219,7 +226,10 @@ metadata:
   name: guestbook-ingress
 spec:
   generators:
-  - clusters: {}
+  - clusters:
+      selector:
+        matchLabels:
+          argocd.argoproj.io/secret-type: cluster
   template:
     metadata:
       name: guestbook-ingress
@@ -228,7 +238,7 @@ spec:
       source:
         repoURL: https://my-git.io/gitea_admin/clusteraddons.git
         targetRevision: HEAD
-        path: "ingress"
+        path: "guestbook-ingress"
         helm:
           releaseName: guestbook-ingress
           parameters:
@@ -290,14 +300,14 @@ spec:
 EOF
 done
 
+exit
+
 
 #TODO check certs ready
 #TODO check if secret is found in cert-manager
 
 
 #To test whter {{cluster}} is propagated to Certificate...
-
-exit
 
 #Create syncrets in gitea
 
@@ -365,37 +375,38 @@ spec:
     app: guestbook-ui
 EOF
     git add ${GUESTBOOKTMP}/${mc}/guestbook-ui-svc.yaml
-    cat << EOF >  ${GUESTBOOKTMP}/${mc}/guestbook-ingress.yaml
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-    name: guestbookl-ingress
-spec:
-    rules:
-    - host: ${mc}
-      http:
-        paths:
-        - path: /
-          pathType: Prefix
-          backend:
-            service:
-              name: guestbook-ui
-              port:
-                number: 80
-    tls:
-    - hosts:
-      - ${mc}
-      secretName: ${mc}-tls
-EOF
-    git add ${GUESTBOOKTMP}/${mc}/guestbook-ingress.yaml
+#    cat << EOF >  ${GUESTBOOKTMP}/${mc}/guestbook-ingress.yaml
+#apiVersion: networking.k8s.io/v1
+#kind: Ingress
+#metadata:
+#    name: guestbookl-ingress
+#spec:
+#    rules:
+#    - host: ${mc}
+#      http:
+#        paths:
+#        - path: /
+#          pathType: Prefix
+#          backend:
+#            service:
+#              name: guestbook-ui
+#              port:
+#                number: 80
+#    tls:
+#    - hosts:
+#      - ${mc}
+#      secretName: ${mc}-tls
+#EOF
+#    git add ${GUESTBOOKTMP}/${mc}/guestbook-ingress.yaml
 done
 
 git remote add origin https://my-git.io/gitea_admin/guestbook.git
 git commit -s -a -m 'Ἐν ἀρχῇ ἦν ὁ λόγος'
-git push 'http://gitea_admin:r8sA8CPHD9!bt6d'@my-git.io/gitea_admin/guestbook.git HEAD
+git push 'https://gitea_admin:r8sA8CPHD9!bt6d'@my-git.io/gitea_admin/guestbook.git HEAD
 cd -
 
 log::info "GIT repo https://my-git.io/gitea_admin/guestbook.git created"
+pe "argocd repo add  --insecure-skip-server-verification https://my-git.io/gitea_admin/guestbook.git"
 
 ###########################
 # Now load the applications
@@ -407,13 +418,18 @@ metadata:
   name: guestbook
 spec:
   generators:
-  - list:
-      elements:
-      - cluster: ${managedclusters[0]}
-        url: https://$(minikube -p ${managedclusters[0]} ip):8443
+  - clusters:
+      selector:
+        matchLabels:
+          argocd.argoproj.io/secret-type: cluster
+#  generators:
+#  - list:
+#      elements:
+#      - cluster: ${managedclusters[0]}
+#        url: https://$(minikube -p ${managedclusters[0]} ip):8443
   template:
     metadata:
-      name: '{{cluster}}-guestbook'
+      name: '{{name}}-guestbook'
     spec:
       project: default
       syncPolicy:
@@ -425,9 +441,9 @@ spec:
       source:
         repoURL: https://my-git.io/gitea_admin/guestbook.git
         targetRevision: HEAD
-        path: '{{cluster}}'
+        path: '{{name}}'
       destination:
-        server: '{{url}}'
+        server: '{{server}}'
         namespace: guestbook
   syncPolicy:
     preserveResourcesOnDeletion: true
