@@ -100,9 +100,21 @@ deployment_in_namespace_for_context_up_and_running() {
 }
 
 
-http_endpoint_is_up()  {
+https_endpoint_is_up()  {
   httpendpoint=$1
-  httpstatus=$(curl  -I  ${httpendpoint} 2>/dev/null | head -n 1 | cut -d$' ' -f2)
+  httpstatus=$(curl -I  ${httpendpoint} 2>/dev/null | head -n 1 | cut -d$' ' -f2)
+  if [[ "${httpstatus}" == "200" ]]
+  then
+    echo "0"
+    return
+  fi
+  echo "1"
+}
+
+
+https_insecure_endpoint_is_up()  {
+  httpendpoint=$1
+  httpstatus=$(curl -I  -k ${httpendpoint} 2>/dev/null | head -n 1 | cut -d$' ' -f2)
   if [[ "${httpstatus}" == "200" ]]
   then
     echo "0"

@@ -88,7 +88,7 @@ do
 done
 
 log::info "Restaring minikube(s)"
-for CLUSTERNAME in "${managedclusters[@]}"
+for CLUSTERNAME in "${clusters[@]}"
 do
     minikube start -p ${CLUSTERNAME};
     minikube -p ${CLUSTERNAME} addons enable ingress
@@ -96,13 +96,14 @@ do
 done
 
 #now starts the mgmt control plane
-minikube start -p ${MGMT}
-wait_until "minikube_up_and_running ${MGMT}"
+#minikube start -p ${MGMT}
+#wait_until "minikube_up_and_running ${MGMT}"
 
 
 for c in $(minikube profile list -o json | jq -r .valid[].Name);
 do echo $(minikube -p $c ip) ${c} | sudo tee -a /etc/hosts
 done
 
+echo $(minikube -p ${MGMT} ip) my-git.io | sudo tee -a /etc/hosts
 
 exit

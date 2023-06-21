@@ -18,9 +18,104 @@ command -v curl >/dev/null 2>&1 || { log::error >&2 "can't find curl. Aborting."
 
 clear
 
+
+#########################
+# Installing cert-manager
+#########################
+log::info "Intalling cert-manager"
+pe "kubectl --context $(get_client_context_from_cluster_name ${MGMT}) apply -f ${ROOTDIR}/manifests/cert-manager/cert-manager.yaml"
+
+
+log::info "waiting for cert-manager to bootstrap"
+sleep 10 # TODO add a wait_until based on deployment creation (unsure whether can avoid the sleep)
+wait_until "crd_defined_for_context certificates.cert-manager.io $(get_client_context_from_cluster_name ${MGMT})" 10 120
+wait_until "crd_defined_for_context issuers.cert-manager.io $(get_client_context_from_cluster_name ${MGMT})" 10 120
+wait_until "all_pods_in_namespace_for_context_are_running cert-manager  $(get_client_context_from_cluster_name ${MGMT})" 10 120
+
+##########################################
+# Deploy cert-manager ca-issuer and certs
+##########################################
+log::info "Let's create the secret needed for the CA-issuer"
+kubectl --context $(get_client_context_from_cluster_name ${MGMT}) -n cert-manager create secret tls ca-key-pair \
+  --key="${ROOTDIR}/mini-ca/intermediate/private/argo_intermediate_private_key.pem" \
+  --cert="${ROOTDIR}/mini-ca/intermediate/argo_intermediate_cert.pem"
+#TODO find a way to deploy this in a more gitops way (external-secret or sealed-secret)
+
+################################################
+# Installing the issuer
+################################################
+pe "kubectl --context $(get_client_context_from_cluster_name ${MGMT}) apply -f ${ROOTDIR}/manifests/cert-manager/ca-issuer.yaml"
+# TODO adds ca-isuer ready
+pe "kubectl --context $(get_client_context_from_cluster_name ${MGMT}) get clusterissuers -n cert-manager"
+
+################################
+# Install gitea on mgmt cluter aka my-git.io
+################################
+#from https://gitea.com/gitea/helm-chart/src/branch/main/values.yaml
+#username: gitea_admin
+#password: r8sA8CPHD9!bt6d
+#email: "gitea@local.domain"
+
+GITEAUSERNAME='gitea_admin'
+GITEAPASSWORD='r8sA8CPHD9!bt6d'
+GITEANS=gitea
+
+log::info "Creating a GIT repository on ${MGMT} cluster using helm charts for GITEA see https://gitea.io/en-us"
+pe "helm --kube-context $(get_client_context_from_cluster_name ${MGMT}) install gitea gitea-charts/gitea  --namespace ${GITEANS} --create-namespace"
+log::info "Adding ingress to gitea (cert-manager generates the certificate)"
+cat <<EOF | kubectl --context $(get_client_context_from_cluster_name ${MGMT}) -n ${GITEANS} apply  -f -
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: gitea-ingress
+  labels:
+    app: gitea-ingress
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+    kubernetes.io/ingress.class: nginx
+    cert-manager.io/cluster-issuer: ca-issuer
+spec:
+  rules:
+  - host: my-git.io
+    http:
+      paths:
+        - path: /
+          pathType: Prefix
+          backend:
+            service:
+              name: gitea-http
+              port:
+                number: 3000
+  tls:
+  - hosts:
+    - my-git.io
+    secretName: my-git-cert
+EOF
+
+# TODO for ariplane mode retrieve image gitea/gitea:1.19.1
+wait_until "pod_in_namespace_for_context_is_running gitea-0 ${GITEANS} $(get_client_context_from_cluster_name ${MGMT})" 10 120
+
+#TODO for "airplane mode" retrieve image  docker.io/bitnami/memcached:1.6.19-debian-11-r3
+wait_until "deployment_in_namespace_for_context_up_and_running gitea-memcached ${GITEANS} $(get_client_context_from_cluster_name ${MGMT})" 10 120
+
+#TODO for airplane mode retrieve image docker.io/bitnami/postgresql:15.2.0-debian-11-r14
+wait_until "pod_in_namespace_for_context_is_running gitea-postgresql-0 ${GITEANS} $(get_client_context_from_cluster_name ${MGMT})" 10 120
+
+#check when/if svc is available
+wait_until "https_endpoint_is_up https://my-git.io" 10 120
+
+log::info "OK you can find git repository at https://my-git.io"
+log::info "Gitea user: ${GITEAUSERNAME}"
+log::info "Gitea password: ${GITEAPASSWORD}"
+
+# Gitea now should be up and running
+
 #################
 # Install ArgoCD
 #################
+
+
+# 1. Installing the workload
 log::info "Install ArgoCD"
 pe "kubectl --context $(get_client_context_from_cluster_name ${MGMT}) create namespace argocd"
 pe "kubectl --context $(get_client_context_from_cluster_name ${MGMT}) apply -n argocd -f manifests/argocd/" # we install only Argo Core
@@ -29,10 +124,7 @@ wait_until "all_pods_in_namespace_for_context_are_running argocd $(get_client_co
 pe "kubectl config use-context  $(get_client_context_from_cluster_name ${MGMT})"
 pe "kubectl config set-context --current --namespace=argocd"
 
-
-################################
-# Creating Argo default project
-################################
+# 2. Creating Argo default project
 log::info "Creating Argo default project"
 cat <<EOF | kubectl --context $(get_client_context_from_cluster_name ${MGMT}) apply  -f -
 apiVersion: argoproj.io/v1alpha1
@@ -51,56 +143,16 @@ spec:
       kind: '*'
 EOF
 
-################################
-# Install gitea on mgmt cluter
-################################
-#from https://gitea.com/gitea/helm-chart/src/branch/main/values.yaml
-#username: gitea_admin
-#password: r8sA8CPHD9!bt6d
-#email: "gitea@local.domain"
-
-GITEAUSERNAME='gitea_admin'
-GITEAPASSWORD='r8sA8CPHD9!bt6d'
-
-log::info "Creating a GIT repository on ${MGMT} cluster using helm charts for GITEA see https://gitea.io/en-us"
-pe "helm --kube-context $(get_client_context_from_cluster_name ${MGMT}) install gitea gitea-charts/gitea  --namespace default --create-namespace --set service.http.type=LoadBalancer"
-
-# TODO for ariplane mode retrieve image gitea/gitea:1.19.1
-wait_until "pod_in_namespace_for_context_is_running gitea-0 default $(get_client_context_from_cluster_name ${MGMT})" 10 120
-
-#TODO for "airplane mode" retrieve image  docker.io/bitnami/memcached:1.6.19-debian-11-r3
-wait_until "deployment_in_namespace_for_context_up_and_running gitea-memcached default $(get_client_context_from_cluster_name ${MGMT})" 10 120
-
-#TODO for airplane mode retrieve image docker.io/bitnami/postgresql:15.2.0-debian-11-r14
-wait_until "pod_in_namespace_for_context_is_running gitea-postgresql-0 default $(get_client_context_from_cluster_name ${MGMT})" 10 120
-
-#gets the gitea ip addres. The ${MGMT} cluster at the moment
-MGMTIP=$(minikube -p "${MGMT}" ip)
-
-#patch the gitea svc on ${MGMT} cluster with the minikube IP address
-kubectl --context $(get_client_context_from_cluster_name ${MGMT}) -n default patch svc gitea-http -p "{\"spec\":{\"externalIPs\":[\"${MGMTIP}\"]}}"
-
-#gets the GITEA port to check when/if svc is available
-GITEAPORT=$(kubectl --context $(get_client_context_from_cluster_name ${MGMT}) -n default get svc gitea-http -o jsonpath='{.spec.ports[0].nodePort}')
-
-#check when/if svc is available
-wait_until "http_endpoint_is_up http://${MGMTIP}:${GITEAPORT}" 10 120
-
-log::info "OK you can find git repository at http://${MGMTIP}:${GITEAPORT}"
-log::info "Gitea user: ${GITEAUSERNAME}"
-log::info "Gitea password: ${GITEAPASSWORD}"
-
 ########################
 # Add clusters to argo
 #######################
 pe "argocd --core=true cluster list"
-
 for mc in "${managedclusters[@]}"; do
     pe "kubectl --context $(get_client_context_from_cluster_name ${mc}) config view --minify --flatten > ${mc}.kubeconfig"
     pe "argocd --core=true cluster add ${mc} --kubeconfig= ${mc}.kubeconfig -y"
 done
-
 pe "argocd --core=true cluster list"
+
 
 #########################################
 # Create secret to deploy apps and appset
@@ -121,108 +173,87 @@ stringData:
 EOF
 
 
-log::info "Creating cert-manager in clusteraddons"
 
-log::info "creating clusteraddons GIT repo in http://${MGMTIP}:${GITEAPORT}"
-curl -u 'gitea_admin:r8sA8CPHD9!bt6d' \
-    -X POST  "http://${MGMTIP}:${GITEAPORT}/api/v1/user/repos" \
+#################
+# Deploy syncrets
+#################
+log::info "Deploying syncrets"
+SYNCRETSDIR=$(mktemp -d /tmp/syncrets.XXXX)
+git clone https://github.com/sdminonne/syncrets.git ${SYNCRETSDIR}
+pushd ${SYNCRETSDIR}
+make build
+make image
+make CLUSTER=${MGMT} push-image
+kubectl --context $(get_client_context_from_cluster_name ${MGMT}) apply  -f ${SYNCRETSDIR}/deployment/syncrets.yaml
+popd
+wait_until "all_pods_in_namespace_for_context_are_running cert-manager  $(get_client_context_from_cluster_name ${MGMT})" 10 120
+
+
+log::info "creating clusteraddons GIT repo in https://my-git.io"
+curl  -u 'gitea_admin:r8sA8CPHD9!bt6d' \
+    -X POST  "https://my-git.io/api/v1/user/repos" \
     -H "Content-Type: application/json" \
     -H "accept: application/json" \
     -d "{\"name\": \"clusteraddons\", \"private\": false}" \
     -i
 
 CLUSTERADDONSTMP=$(mktemp -d)/clusteraddons
-mkdir -p ${CLUSTERADDONSTMP}/cert-manager/
+mkdir -p ${CLUSTERADDONSTMP}
 git init ${CLUSTERADDONSTMP}
-cp  ${ROOTDIR}/manifests/cert-manager/cert-manager.yaml ${CLUSTERADDONSTMP}/cert-manager/cert-manager.yaml 
-cd ${CLUSTERADDONSTMP}
-git add ${CLUSTERADDONSTMP}/cert-manager
-git remote add origin http://${MGMTIP}:${GITEAPORT}/gitea_admin/clusteraddons
-git commit -s -a -m 'Ἐν ἀρχῇ ἦν ὁ λόγος'
-git push 'http://gitea_admin:r8sA8CPHD9!bt6d'@${MGMTIP}:${GITEAPORT}/gitea_admin/clusteraddons.git HEAD
+pe "cp  -r ${ROOTDIR}/manifests/helm-ingress/ ${CLUSTERADDONSTMP}"
+pushd ${CLUSTERADDONSTMP}
+git remote add origin 'https://gitea_admin:r8sA8CPHD9!bt6d'@my-git.io/gitea_admin/clusteraddons.git
+pe "git add ${CLUSTERADDONSTMP}/helm-ingress"
+pe "git commit -s -a -m 'To add helm-ingress'"
+git push 'https://gitea_admin:r8sA8CPHD9!bt6d'@my-git.io/gitea_admin/clusteraddons.git HEAD
+popd
 
-
-cat <<EOF | kubectl --context $(get_client_context_from_cluster_name ${MGMT}) apply  -f -
+########################################################
+# Deploy the remote ingress to host transfer certiicates
+########################################################
+log::info "Deploying the guesbook-ingress to remote clusters"
+cat <<EOF |  kubectl --context $(get_client_context_from_cluster_name ${MGMT})  apply  -f -
 apiVersion: argoproj.io/v1alpha1
 kind: ApplicationSet
 metadata:
-  name: cert-manager
+  name: guestbook-ingress
 spec:
   generators:
-  - matrix:
-      generators:
-        - git:
-            repoURL: http://${MGMTIP}:${GITEAPORT}/gitea_admin/clusteraddons.git
-            revision: HEAD
-            directories:
-            - path: cert-manager
-        - clusters:
-            selector:
-              matchLabels:
-                argocd.argoproj.io/secret-type: cluster
-                cluster-type: management
+  - clusters: {}
   template:
     metadata:
-      name: 'cert-manager'
-      namespace: argocd
+      name: guestbook-ingress
     spec:
       project: default
       source:
-        repoURL: http://${MGMTIP}:${GITEAPORT}/gitea_admin/clusteraddons.git
+        repoURL: https://my-git.io/gitea_admin/clusteraddons.git
         targetRevision: HEAD
-        path: '{{path}}'
+        path: "ingress"
+        helm:
+          releaseName: guestbook-ingress
+          parameters:
+          - name: host
+            value: '{{name}}'
+          - name: secret
+            value: '{{name}}-tls'
       destination:
         server: '{{server}}'
-        namespace: '{{path}}'
+        namespace: guestbook
       syncPolicy:
         automated:
           prune: true
           selfHeal: true
         syncOptions:
           - CreateNamespace=true
-  syncPolicy:
-    preserveResourcesOnDeletion: true
 EOF
 
 
 
-log::info "waiting for cert-manager to bootstrap"
-sleep 10
-wait_until "crd_defined_for_context certificates.cert-manager.io $(get_client_context_from_cluster_name ${MGMT})" 10 120
-wait_until "crd_defined_for_context issuers.cert-manager.io $(get_client_context_from_cluster_name ${MGMT})" 10 120
-wait_until "all_pods_in_namespace_for_context_are_running cert-manager  $(get_client_context_from_cluster_name ${MGMT})" 10 120
 
-
-##########################################
-# Deploy cert-manager ca-issuer and certs
-##########################################
-log::info "Let's create the secret needed for the CA-issuer"
-kubectl --context $(get_client_context_from_cluster_name ${MGMT}) -n cert-manager create secret tls ca-key-pair \
-  --key="${ROOTDIR}/mini-ca/intermediate/private/argo_intermediate_private_key.pem" \
-  --cert="${ROOTDIR}/mini-ca/intermediate/argo_intermediate_cert.pem"
-
-
-
-
-
-#####################################################################
-# and now through GitOps the CA-issuer and the certificate requests
-#####################################################################
-log::info "Creating cert-manager Issuer"
-cat <<EOF | kubectl --context $(get_client_context_from_cluster_name ${MGMT}) apply  -f -
-apiVersion: cert-manager.io/v1
-kind: Issuer
-metadata:
-  name: ca-issuer
-  namespace: cert-manager
-spec:
-  ca:
-    secretName: ca-key-pair
-EOF
-
-#TODO add check issuer ready
-
-
+#############################
+# Now we ask the certificates
+#############################
+log::info "Asking for certicates"
 for mc in "${managedclusters[@]}"; do
 cat <<EOF | kubectl --context $(get_client_context_from_cluster_name ${MGMT}) apply  -f -
 apiVersion: cert-manager.io/v1
@@ -232,8 +263,8 @@ metadata:
   namespace: cert-manager
 spec:
   secretName: ${mc}-tls
-  duration: 24h
-  renewBefore: 12h
+  duration: 2h
+  renewBefore: 1h
   secretTemplate:
     annotations:
       syncrets-namespace: guestbook
@@ -254,7 +285,7 @@ spec:
     - ${mc}
   issuerRef:
     name: ca-issuer
-    kind: Issuer
+    kind: ClusterIssuer
     group: cert-manager.io
 EOF
 done
@@ -279,23 +310,13 @@ exit
 4) Create certs
 5) Deploy Guestbook
 
-#1---4
-#Bisogna creare
-#http://${MGMTIP}:${GITEAPORT}/gitea_admin/cluster-addons/management/cert-manager
-#http://${MGMTIP}:${GITEAPORT}/gitea_admin/cluster-addons/management/syncrets
-
-
-
-
-#TODO wait_until "certificates.cert-manager.io in namespace for context READY"
-#TODO wait_until "certificates.cert-manager.io in namespace for context READY"
 
 ###########################
 # creating guestbook on git
 ###########################
-log::info "creating guestbook GIT repo in http://${MGMTIP}:${GITEAPORT}"
+log::info "creating guestbook GIT repo in https://my-git.io"
 curl -u 'gitea_admin:r8sA8CPHD9!bt6d' \
-    -X POST  "http://${MGMTIP}:${GITEAPORT}/api/v1/user/repos" \
+    -X POST  "https://my-git.io/api/v1/user/repos" \
     -H "Content-Type: application/json" \
     -H "accept: application/json" \
     -d "{\"name\": \"guestbook\", \"private\": false}" \
@@ -369,16 +390,16 @@ EOF
     git add ${GUESTBOOKTMP}/${mc}/guestbook-ingress.yaml
 done
 
-git remote add origin http://${MGMTIP}:${GITEAPORT}/gitea_admin/guestbook.git
+git remote add origin https://my-git.io/gitea_admin/guestbook.git
 git commit -s -a -m 'Ἐν ἀρχῇ ἦν ὁ λόγος'
-git push 'http://gitea_admin:r8sA8CPHD9!bt6d'@${MGMTIP}:${GITEAPORT}/gitea_admin/guestbook.git HEAD
+git push 'http://gitea_admin:r8sA8CPHD9!bt6d'@my-git.io/gitea_admin/guestbook.git HEAD
 cd -
 
-log::info "GIT repo http://${MGMTIP}:${GITEAPORT}/gitea_admin/guestbook.git created"
+log::info "GIT repo https://my-git.io/gitea_admin/guestbook.git created"
 
-#####################################
+###########################
 # Now load the applications
-#####################################
+###########################
 cat <<EOF | kubectl --context $(get_client_context_from_cluster_name ${MGMT}) apply -f -
 apiVersion: argoproj.io/v1alpha1
 kind: ApplicationSet
@@ -402,7 +423,7 @@ spec:
         syncOptions:
           - CreateNamespace=true
       source:
-        repoURL: http://${MGMTIP}:${GITEAPORT}/gitea_admin/guestbook.git
+        repoURL: https://my-git.io/gitea_admin/guestbook.git
         targetRevision: HEAD
         path: '{{cluster}}'
       destination:
