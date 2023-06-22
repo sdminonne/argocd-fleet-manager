@@ -143,15 +143,6 @@ spec:
       kind: '*'
 EOF
 
-########################
-# Add clusters to argo
-#######################
-pe "argocd --core=true cluster list"
-for mc in "${managedclusters[@]}"; do
-    pe "kubectl --context $(get_client_context_from_cluster_name ${mc}) config view --minify --flatten > ${mc}.kubeconfig"
-    pe "argocd --core=true cluster add ${mc} --kubeconfig= ${mc}.kubeconfig -y"
-done
-pe "argocd --core=true cluster list"
 
 
 #########################################
@@ -201,12 +192,13 @@ curl  -u 'gitea_admin:r8sA8CPHD9!bt6d' \
 CLUSTERADDONSTMP=$(mktemp -d)/clusteraddons
 mkdir -p ${CLUSTERADDONSTMP}
 git init ${CLUSTERADDONSTMP}
-pe "cp  -r ${ROOTDIR}/manifests/guestbook-ingress// ${CLUSTERADDONSTMP}"
+pe "cp  -r ${ROOTDIR}/manifests/guestbook ${CLUSTERADDONSTMP}"
 pushd ${CLUSTERADDONSTMP}
 git remote add origin 'https://gitea_admin:r8sA8CPHD9!bt6d'@my-git.io/gitea_admin/clusteraddons.git
-pe "git add ${CLUSTERADDONSTMP}/guestbook-ingress"
-pe "git commit -s -a -m 'To add guestbook-ingress'"
-git push 'https://gitea_admin:r8sA8CPHD9!bt6d'@my-git.io/gitea_admin/clusteraddons.git HEAD
+pe "git add ${CLUSTERADDONSTMP}/guestbook"
+pe "git commit -s -a -m 'To add guestbook'"
+#git push 'https://gitea_admin:r8sA8CPHD9!bt6d'@my-git.io/gitea_admin/clusteraddons.git HEAD
+pe "git push origin HEAD"
 popd
 
 ###########################################################################
@@ -223,7 +215,7 @@ cat <<EOF |  kubectl --context $(get_client_context_from_cluster_name ${MGMT})  
 apiVersion: argoproj.io/v1alpha1
 kind: ApplicationSet
 metadata:
-  name: guestbook-ingress
+  name: guestbook
 spec:
   generators:
   - clusters:
@@ -232,15 +224,15 @@ spec:
           argocd.argoproj.io/secret-type: cluster
   template:
     metadata:
-      name: guestbook-ingress
+      name: guestbook
     spec:
       project: default
       source:
         repoURL: https://my-git.io/gitea_admin/clusteraddons.git
         targetRevision: HEAD
-        path: "guestbook-ingress"
+        path: "guestbook"
         helm:
-          releaseName: guestbook-ingress
+          releaseName: guestbook
           parameters:
           - name: host
             value: '{{name}}'
@@ -299,6 +291,30 @@ spec:
     group: cert-manager.io
 EOF
 done
+
+
+########################
+# Add clusters to argo
+#######################
+pe "argocd --core=true cluster list"
+for mc in "${managedclusters[@]}"; do
+    pe "kubectl --context $(get_client_context_from_cluster_name ${mc}) config view --minify --flatten > ${mc}.kubeconfig"
+    pe "argocd --core=true cluster add ${mc} --kubeconfig= ${mc}.kubeconfig -y"
+done
+pe "argocd --core=true cluster list"
+
+
+
+
+#####################################
+# Now sync the applications
+#####################################
+for mc in "${managedclusters[@]}"; do
+    pe "argocd app sync ${mc}-guestbook"
+done
+
+
+pe "kubectl get apps"
 
 exit
 
@@ -452,14 +468,6 @@ EOF
 
 
 
-#####################################
-# Now sync the applications
-#####################################
-for mc in "${managedclusters[@]}"; do
-    pe "argocd app sync ${mc}-guestbook"
-done
 
-
-pe "kubectl get apps"
 
 exit
