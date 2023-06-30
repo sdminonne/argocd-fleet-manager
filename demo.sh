@@ -39,7 +39,7 @@ log::info "Let's create the secret needed for the CA-issuer"
 kubectl --context $(get_client_context_from_cluster_name ${MGMT}) -n cert-manager create secret tls ca-key-pair \
   --key="${ROOTDIR}/mini-ca/intermediate/private/argo_intermediate_private_key.pem" \
   --cert="${ROOTDIR}/mini-ca/intermediate/argo_intermediate_cert.pem"
-#TODO find a way to deploy this in a more gitops way (external-secret or sealed-secret)
+#TODO find a way to deploy this in a more gitops way
 
 ################################################
 # Installing the issuer
@@ -48,9 +48,9 @@ pe "kubectl --context $(get_client_context_from_cluster_name ${MGMT}) apply -f $
 # TODO adds ca-isuer ready
 pe "kubectl --context $(get_client_context_from_cluster_name ${MGMT}) get clusterissuers -n cert-manager"
 
-################################
-# Install gitea on mgmt cluter aka my-git.io
-################################
+#############################################
+# Install gitea on mgmt cluster aka my-git.io
+#############################################
 #from https://gitea.com/gitea/helm-chart/src/branch/main/values.yaml
 #username: gitea_admin
 #password: r8sA8CPHD9!bt6d
@@ -113,9 +113,7 @@ log::info "Gitea password: ${GITEAPASSWORD}"
 #################
 # Install ArgoCD
 #################
-
-
-# 1. Installing the workload
+# 1. Installing the core
 log::info "Installing ArgoCD"
 pe "kubectl --context $(get_client_context_from_cluster_name ${MGMT}) create namespace argocd"
 pe "kubectl --context $(get_client_context_from_cluster_name ${MGMT}) apply -n argocd -f manifests/argocd/" # we install only Argo Core
@@ -143,25 +141,6 @@ spec:
       kind: '*'
 EOF
 
-
-
-#########################################
-# Create secret to deploy apps and appset
-#########################################
-cat <<EOF | kubectl --context $(get_client_context_from_cluster_name ${MGMT}) apply  -f -
-apiVersion: argoproj.io/v1alpha1
-apiVersion: v1
-kind: Secret
-metadata:
-  name: in-cluster
-  labels:
-    app.kubernetes.io/part-of: argocd
-    argocd.argoproj.io/secret-type: cluster
-    argo-fm/cluster-type: management
-type: Opaque
-stringData:
-  server: https://kubernetes.default.svc
-EOF
 
 #################
 # Deploy syncrets
@@ -191,13 +170,10 @@ CLUSTERADDONSTMP=$(mktemp -d)/clusteraddons
 mkdir -p ${CLUSTERADDONSTMP}
 git init ${CLUSTERADDONSTMP}
 pe "cp  -r ${ROOTDIR}/manifests/guestbook ${CLUSTERADDONSTMP}"
-pe "cp -r ${ROOTDIR}/manifests/guestbook-certificate ${CLUSTERADDONSTMP}"
 pushd ${CLUSTERADDONSTMP}
 git remote add origin 'https://gitea_admin:r8sA8CPHD9!bt6d'@my-git.io/gitea_admin/clusteraddons.git
 pe "git add ${CLUSTERADDONSTMP}/guestbook"
-#pe "git add ${CLUSTERADDONSTMP}/guestbook-certificate"
-pe "git commit -s -a -m 'To add guestbook and guestbook-certificate'"
-#git push 'https://gitea_admin:r8sA8CPHD9!bt6d'@my-git.io/gitea_admin/clusteraddons.git HEAD
+pe "git commit -s -a -m 'To add guestbook'"
 pe "git push origin HEAD"
 popd
 
@@ -207,122 +183,61 @@ popd
 pe "argocd repo add  --insecure-skip-server-verification https://my-git.io/gitea_admin/clusteraddons.git"
 
 
-########################################################
-# Deploy the remote ingress to host transfer certiicates
-########################################################
-#log::info "Deploying the guesbook-ingress to remote clusters"
-#cat <<EOF |  kubectl --context $(get_client_context_from_cluster_name ${MGMT})  apply  -f -
-#apiVersion: argoproj.io/v1alpha1
-#kind: ApplicationSet
-#metadata:
-#  name: guestbook
-#spec:
-#  generators:
-#  - clusters:
-#      selector:
-#        matchExpressions:
-#        - key: argocd.argoproj.io/secret-type
-#          operator: In
-#          values:
-#          - "cluster"
-#        - key: argo-fm/cluster-type
-#          operator: NotIn
-#          values:
-#          - "management"
-#  template:
-#    metadata:
-#      name: guestbook
-#    spec:
-#      project: default
-#      source:
-#        repoURL: https://my-git.io/gitea_admin/clusteraddons.git
-#        targetRevision: HEAD
-#        path: "guestbook"
-#        helm:
-#          releaseName: guestbook
-#          parameters:
-#          - name: host
-#            value: '{{name}}'
-#          - name: secret
-#            value: '{{name}}-tls'
-#      destination:
-#        server: '{{server}}'
-#        namespace: guestbook
-#      syncPolicy:
-#        automated:
-#          prune: true
-#          selfHeal: true
-#        syncOptions:
-#          - CreateNamespace=true
+
+##################
+# Deploy guestbook 
+##################
+log::info "Deploying the guesbook-ingress to remote clusters"
+cat <<EOF |  kubectl --context $(get_client_context_from_cluster_name ${MGMT})  apply  -f -
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: guestbook
+spec:
+  generators:
+  - clusters:
+      selector:
+        matchExpressions:
+        - key: argocd.argoproj.io/secret-type
+          operator: In
+          values:
+          - "cluster"
+  template:
+    metadata:
+      name: guestbook
+    spec:
+      project: default
+      source:
+        repoURL: https://my-git.io/gitea_admin/clusteraddons.git
+        targetRevision: HEAD
+        path: "guestbook"
+        helm:
+          releaseName: guestbook
+          parameters:
+          - name: host
+            value: '{{name}}'
+          - name: secret
+            value: '{{name}}-tls'
+      destination:
+        server: '{{server}}'
+        namespace: guestbook
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=true
 EOF
 
 
-#############################
-# Now we ask the certificates
-#############################
-#log::info "Asking for certicates"
-#cat <<EOF | kubectl --context $(get_client_context_from_cluster_name ${MGMT}) apply  -f -
-#apiVersion: argoproj.io/v1alpha1
-#kind: ApplicationSet
-#metadata:
-#  name: certificate-request
-#spec:
-#  generators:
-#    - matrix:
-#        generators:
-#         - clusters:
-#             selector:
-#               matchLabels:
-#                 argocd.argoproj.io/secret-type: cluster
-#                 argocd.fleet-manager: management
-#             values:
-#               managementname: '{{name}}'
-#         - clusters:
-#            selector:
-#               matchExpressions:
-#                - key: argocd.argoproj.io/secret-type
-#                  operator: In
-#                  values:
-#                  - "cluster"
-#                - key: argo-fm/cluster-type
-#                  operator: NotIn
-#                  values:
-#                  - "management"
-#             values:
-#               hostedname: '{{name}}'
-#  template:
-#    metadata:
-#      name: guestbook
-#    spec:
-#      project: default
-#      source:
-#        repoURL: https://my-git.io/gitea_admin/clusteraddons.git
-#        targetRevision: HEAD
-#        path: "guestbook-certificate"
-#        helm:
-#          releaseName: guestbook-certificate
-#          parameters:
-#          - name: host
-#            value: '{{values.Hostedname}}'
-#          - name: secret
-#            value: '{{values.Hostedname}}-tls'
-#      destination:
-#        server: '{{values.Managementname}}'
-#        namespace: cert-manager
-#      syncPolicy:
-#        automated:
-#          prune: true
-#          selfHeal: true
-#        syncOptions:
-#          - CreateNamespace=true
-#EOF
 
-
-#############################
-# Now we ask the certificates
-#############################
-#log::info "Asking for certicates"
+##############################################
+# Add clusters to argo and ask the certificate
+##############################################
+pe "argocd --core=true cluster list"
 for mc in "${managedclusters[@]}"; do
+    pe "kubectl --context $(get_client_context_from_cluster_name ${mc}) config view --minify --flatten > ${mc}.kubeconfig"
+    pe "argocd --core=true cluster add ${mc} --kubeconfig= ${mc}.kubeconfig -y"
 cat <<EOF | kubectl --context $(get_client_context_from_cluster_name ${MGMT}) apply  -f -
 apiVersion: cert-manager.io/v1
 kind: Certificate
@@ -358,182 +273,4 @@ spec:
 EOF
 done
 
-
-########################
-# Add clusters to argo
-#######################
 pe "argocd --core=true cluster list"
-for mc in "${managedclusters[@]}"; do
-    pe "kubectl --context $(get_client_context_from_cluster_name ${mc}) config view --minify --flatten > ${mc}.kubeconfig"
-    pe "argocd --core=true cluster add ${mc} --kubeconfig= ${mc}.kubeconfig -y"
-done
-pe "argocd --core=true cluster list"
-
-
-
-
-#####################################
-# Now sync the applications
-#####################################
-for mc in "${managedclusters[@]}"; do
-    pe "argocd app sync ${mc}-guestbook"
-done
-
-
-pe "kubectl get apps"
-
-exit
-
-
-#TODO check certs ready
-#TODO check if secret is found in cert-manager
-
-
-#To test whter {{cluster}} is propagated to Certificate...
-
-#Create syncrets in gitea
-
-#Create certs
-
-
-1) Deploy cert-manager
-2) Create CA-Issuer
-3) Deploy syncrets
-4) Create certs
-5) Deploy Guestbook
-
-
-###########################
-# creating guestbook on git
-###########################
-log::info "creating guestbook GIT repo in https://my-git.io"
-curl -u 'gitea_admin:r8sA8CPHD9!bt6d' \
-    -X POST  "https://my-git.io/api/v1/user/repos" \
-    -H "Content-Type: application/json" \
-    -H "accept: application/json" \
-    -d "{\"name\": \"guestbook\", \"private\": false}" \
-    -i
-#TODO check $?
-
-GUESTBOOKTMP=$(mktemp -d)/guestbook
-git init ${GUESTBOOKTMP}
-cd ${GUESTBOOKTMP}
-
-for mc in "${managedclusters[@]}"; do
-    mkdir -p  ${GUESTBOOKTMP}/${mc}
-    cat << 'EOF' >  ${GUESTBOOKTMP}/${mc}/guestbook-ui-deployment.yaml
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: guestbook-ui
-spec:
-  replicas: 1
-  revisionHistoryLimit: 3
-  selector:
-    matchLabels:
-      app: guestbook-ui
-  template:
-    metadata:
-      labels:
-        app: guestbook-ui
-    spec:
-      containers:
-      - image: gcr.io/heptio-images/ks-guestbook-demo:0.1
-        name: guestbook-ui
-        ports:
-        - containerPort: 80
-EOF
-    git add ${GUESTBOOKTMP}/${mc}/guestbook-ui-deployment.yaml
-    cat << EOF >  ${GUESTBOOKTMP}/${mc}/guestbook-ui-svc.yaml
-apiVersion: v1
-kind: Service
-metadata:
-  name: guestbook-ui
-spec:
-  ports:
-  - port: 80
-    targetPort: 80
-  selector:
-    app: guestbook-ui
-EOF
-    git add ${GUESTBOOKTMP}/${mc}/guestbook-ui-svc.yaml
-#    cat << EOF >  ${GUESTBOOKTMP}/${mc}/guestbook-ingress.yaml
-#apiVersion: networking.k8s.io/v1
-#kind: Ingress
-#metadata:
-#    name: guestbookl-ingress
-#spec:
-#    rules:
-#    - host: ${mc}
-#      http:
-#        paths:
-#        - path: /
-#          pathType: Prefix
-#          backend:
-#            service:
-#              name: guestbook-ui
-#              port:
-#                number: 80
-#    tls:
-#    - hosts:
-#      - ${mc}
-#      secretName: ${mc}-tls
-#EOF
-#    git add ${GUESTBOOKTMP}/${mc}/guestbook-ingress.yaml
-done
-
-git remote add origin https://my-git.io/gitea_admin/guestbook.git
-git commit -s -a -m 'Ἐν ἀρχῇ ἦν ὁ λόγος'
-git push 'https://gitea_admin:r8sA8CPHD9!bt6d'@my-git.io/gitea_admin/guestbook.git HEAD
-cd -
-
-log::info "GIT repo https://my-git.io/gitea_admin/guestbook.git created"
-pe "argocd repo add  --insecure-skip-server-verification https://my-git.io/gitea_admin/guestbook.git"
-
-###########################
-# Now load the applications
-###########################
-cat <<EOF | kubectl --context $(get_client_context_from_cluster_name ${MGMT}) apply -f -
-apiVersion: argoproj.io/v1alpha1
-kind: ApplicationSet
-metadata:
-  name: guestbook
-spec:
-  generators:
-  - clusters:
-      selector:
-        matchLabels:
-          argocd.argoproj.io/secret-type: cluster
-#  generators:
-#  - list:
-#      elements:
-#      - cluster: ${managedclusters[0]}
-#        url: https://$(minikube -p ${managedclusters[0]} ip):8443
-  template:
-    metadata:
-      name: '{{name}}-guestbook'
-    spec:
-      project: default
-      syncPolicy:
-        automated:
-          prune: true
-          selfHeal: true
-        syncOptions:
-          - CreateNamespace=true
-      source:
-        repoURL: https://my-git.io/gitea_admin/guestbook.git
-        targetRevision: HEAD
-        path: '{{name}}'
-      destination:
-        server: '{{server}}'
-        namespace: guestbook
-  syncPolicy:
-    preserveResourcesOnDeletion: true
-EOF
-
-
-
-
-
-
-exit
