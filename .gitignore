@@ -11,3 +11,5 @@ kubeconfig
 trashcan/
 mini-ca/root/
 mini-ca/intermediate
+.vscode
+*.kubeconfig

@@ -148,22 +148,20 @@ EOF
 #########################################
 # Create secret to deploy apps and appset
 #########################################
-#cat <<EOF | kubectl --context $(get_client_context_from_cluster_name ${MGMT}) apply  -f -
-#apiVersion: argoproj.io/v1alpha1
-#apiVersion: v1
-#kind: Secret
-#metadata:
-#  name: in-cluster
-#  labels:
-#    app.kubernetes.io/part-of: argocd
-#    argocd.argoproj.io/secret-type: cluster
-#    cluster-type: management
-#type: Opaque
-#stringData:
-#  server: https://kubernetes.default.svc
-#EOF
-
-
+cat <<EOF | kubectl --context $(get_client_context_from_cluster_name ${MGMT}) apply  -f -
+apiVersion: argoproj.io/v1alpha1
+apiVersion: v1
+kind: Secret
+metadata:
+  name: in-cluster
+  labels:
+    app.kubernetes.io/part-of: argocd
+    argocd.argoproj.io/secret-type: cluster
+    argo-fm/cluster-type: management
+type: Opaque
+stringData:
+  server: https://kubernetes.default.svc
+EOF
 
 #################
 # Deploy syncrets
@@ -193,10 +191,12 @@ CLUSTERADDONSTMP=$(mktemp -d)/clusteraddons
 mkdir -p ${CLUSTERADDONSTMP}
 git init ${CLUSTERADDONSTMP}
 pe "cp  -r ${ROOTDIR}/manifests/guestbook ${CLUSTERADDONSTMP}"
+pe "cp -r ${ROOTDIR}/manifests/guestbook-certificate ${CLUSTERADDONSTMP}"
 pushd ${CLUSTERADDONSTMP}
 git remote add origin 'https://gitea_admin:r8sA8CPHD9!bt6d'@my-git.io/gitea_admin/clusteraddons.git
 pe "git add ${CLUSTERADDONSTMP}/guestbook"
-pe "git commit -s -a -m 'To add guestbook'"
+#pe "git add ${CLUSTERADDONSTMP}/guestbook-certificate"
+pe "git commit -s -a -m 'To add guestbook and guestbook-certificate'"
 #git push 'https://gitea_admin:r8sA8CPHD9!bt6d'@my-git.io/gitea_admin/clusteraddons.git HEAD
 pe "git push origin HEAD"
 popd
@@ -210,52 +210,118 @@ pe "argocd repo add  --insecure-skip-server-verification https://my-git.io/gitea
 ########################################################
 # Deploy the remote ingress to host transfer certiicates
 ########################################################
-log::info "Deploying the guesbook-ingress to remote clusters"
-cat <<EOF |  kubectl --context $(get_client_context_from_cluster_name ${MGMT})  apply  -f -
-apiVersion: argoproj.io/v1alpha1
-kind: ApplicationSet
-metadata:
-  name: guestbook
-spec:
-  generators:
-  - clusters:
-      selector:
-        matchLabels:
-          argocd.argoproj.io/secret-type: cluster
-  template:
-    metadata:
-      name: guestbook
-    spec:
-      project: default
-      source:
-        repoURL: https://my-git.io/gitea_admin/clusteraddons.git
-        targetRevision: HEAD
-        path: "guestbook"
-        helm:
-          releaseName: guestbook
-          parameters:
-          - name: host
-            value: '{{name}}'
-          - name: secret
-            value: '{{name}}-tls'
-      destination:
-        server: '{{server}}'
-        namespace: guestbook
-      syncPolicy:
-        automated:
-          prune: true
-          selfHeal: true
-        syncOptions:
-          - CreateNamespace=true
+#log::info "Deploying the guesbook-ingress to remote clusters"
+#cat <<EOF |  kubectl --context $(get_client_context_from_cluster_name ${MGMT})  apply  -f -
+#apiVersion: argoproj.io/v1alpha1
+#kind: ApplicationSet
+#metadata:
+#  name: guestbook
+#spec:
+#  generators:
+#  - clusters:
+#      selector:
+#        matchExpressions:
+#        - key: argocd.argoproj.io/secret-type
+#          operator: In
+#          values:
+#          - "cluster"
+#        - key: argo-fm/cluster-type
+#          operator: NotIn
+#          values:
+#          - "management"
+#  template:
+#    metadata:
+#      name: guestbook
+#    spec:
+#      project: default
+#      source:
+#        repoURL: https://my-git.io/gitea_admin/clusteraddons.git
+#        targetRevision: HEAD
+#        path: "guestbook"
+#        helm:
+#          releaseName: guestbook
+#          parameters:
+#          - name: host
+#            value: '{{name}}'
+#          - name: secret
+#            value: '{{name}}-tls'
+#      destination:
+#        server: '{{server}}'
+#        namespace: guestbook
+#      syncPolicy:
+#        automated:
+#          prune: true
+#          selfHeal: true
+#        syncOptions:
+#          - CreateNamespace=true
 EOF
-
-
 
 
 #############################
 # Now we ask the certificates
 #############################
-log::info "Asking for certicates"
+#log::info "Asking for certicates"
+#cat <<EOF | kubectl --context $(get_client_context_from_cluster_name ${MGMT}) apply  -f -
+#apiVersion: argoproj.io/v1alpha1
+#kind: ApplicationSet
+#metadata:
+#  name: certificate-request
+#spec:
+#  generators:
+#    - matrix:
+#        generators:
+#         - clusters:
+#             selector:
+#               matchLabels:
+#                 argocd.argoproj.io/secret-type: cluster
+#                 argocd.fleet-manager: management
+#             values:
+#               managementname: '{{name}}'
+#         - clusters:
+#            selector:
+#               matchExpressions:
+#                - key: argocd.argoproj.io/secret-type
+#                  operator: In
+#                  values:
+#                  - "cluster"
+#                - key: argo-fm/cluster-type
+#                  operator: NotIn
+#                  values:
+#                  - "management"
+#             values:
+#               hostedname: '{{name}}'
+#  template:
+#    metadata:
+#      name: guestbook
+#    spec:
+#      project: default
+#      source:
+#        repoURL: https://my-git.io/gitea_admin/clusteraddons.git
+#        targetRevision: HEAD
+#        path: "guestbook-certificate"
+#        helm:
+#          releaseName: guestbook-certificate
+#          parameters:
+#          - name: host
+#            value: '{{values.Hostedname}}'
+#          - name: secret
+#            value: '{{values.Hostedname}}-tls'
+#      destination:
+#        server: '{{values.Managementname}}'
+#        namespace: cert-manager
+#      syncPolicy:
+#        automated:
+#          prune: true
+#          selfHeal: true
+#        syncOptions:
+#          - CreateNamespace=true
+#EOF
+
+
+#############################
+# Now we ask the certificates
+#############################
+#log::info "Asking for certicates"
 for mc in "${managedclusters[@]}"; do
 cat <<EOF | kubectl --context $(get_client_context_from_cluster_name ${MGMT}) apply  -f -
 apiVersion: cert-manager.io/v1

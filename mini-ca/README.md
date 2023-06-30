@@ -31,6 +31,6 @@ $ sudo rm /etc/pki/ca-trust/source/anchors/argo_root_cert.pem
 ```shell
 $ sudo update-ca-trust
 ```
-
+02
 Thanks to https://github.com/PacktPublishing/Demystifying-Cryptography-with-OpenSSL-3/tree/main/Chapter12/mini-ca
 and https://www.devdungeon.com/content/how-add-trusted-ca-certificate-centosfedora

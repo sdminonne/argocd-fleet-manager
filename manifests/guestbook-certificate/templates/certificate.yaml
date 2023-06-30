@@ -1,0 +1,31 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: ${mc}-cert
+  namespace: cert-manager
+spec:
+  secretName: {{ .Values.secret }}
+  duration: 2h
+  renewBefore: 1h
+  secretTemplate:
+    annotations:
+      syncrets-namespace: guestbook
+    labels:
+      cluster: {{ .Values.host }}
+  commonName: {{ .Values.host }}
+  subject:
+    organizations:
+      - argocd-fleet-manager
+    organizationalUnits:
+      - argo
+  privateKey:
+    algorithm: RSA
+    size: 2048
+  usages:
+    - server auth
+  dnsNames:
+    - {{ .Values.host }}
+  issuerRef:
+    name: ca-issuer
+    kind: ClusterIssuer
+    group: cert-manager.io

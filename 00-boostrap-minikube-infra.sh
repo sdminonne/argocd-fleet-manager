@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 
-
 . common.sh
 
 log::info "KUBECONFIG $KUBECONFIG"
