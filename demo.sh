@@ -35,7 +35,7 @@ wait_until "all_pods_in_namespace_for_context_are_running cert-manager  $(get_cl
 ##########################################
 # Deploy cert-manager ca-issuer and certs
 ##########################################
-log::info "Let's create the secret needed for the CA-issuer"
+log::info "Let's create  ca-key-pair: secret needed for the CA-issuer"
 kubectl --context $(get_client_context_from_cluster_name ${MGMT}) -n cert-manager create secret tls ca-key-pair \
   --key="${ROOTDIR}/mini-ca/intermediate/private/argo_intermediate_private_key.pem" \
   --cert="${ROOTDIR}/mini-ca/intermediate/argo_intermediate_cert.pem"
@@ -52,12 +52,8 @@ pe "kubectl --context $(get_client_context_from_cluster_name ${MGMT}) get cluste
 # Install gitea on mgmt cluster aka my-git.io
 #############################################
 #from https://gitea.com/gitea/helm-chart/src/branch/main/values.yaml
-#username: gitea_admin
-#password: r8sA8CPHD9!bt6d
-#email: "gitea@local.domain"
-
-GITEAUSERNAME='gitea_admin'
-GITEAPASSWORD='r8sA8CPHD9!bt6d'
+GITEAUSERNAME='gitea_admin' #username: gitea_admin
+GITEAPASSWORD='r8sA8CPHD9!bt6d' #password: r8sA8CPHD9!bt6d
 GITEANS=gitea
 
 log::info "Creating a GIT server on ${MGMT} cluster using helm charts for GITEA see https://gitea.io/en-us"
@@ -141,23 +137,6 @@ spec:
       kind: '*'
 EOF
 
-
-#################
-# Deploy syncrets
-#################
-log::info "Deploying syncrets"
-#SYNCRETSDIR=$(mktemp -d /tmp/syncrets.XXXX)
-#git clone https://github.com/sdminonne/syncrets.git ${SYNCRETSDIR}
-SYNCRETSDIR=~/dev/sdminonne/syncrets/src/github.com/sdminonne/syncrets/
-pushd ${SYNCRETSDIR}
-make build
-make image
-make CLUSTER=${MGMT} push-image
-kubectl --context $(get_client_context_from_cluster_name ${MGMT}) apply  -f ${SYNCRETSDIR}/deployment/syncrets.yaml
-popd
-wait_until "all_pods_in_namespace_for_context_are_running cert-manager  $(get_client_context_from_cluster_name ${MGMT})" 10 120
-
-
 log::info "creating clusteraddons GIT repo in https://my-git.io"
 curl  -u 'gitea_admin:r8sA8CPHD9!bt6d' \
     -X POST  "https://my-git.io/api/v1/user/repos" \
@@ -177,15 +156,15 @@ pe "git commit -s -a -m 'To add guestbook'"
 pe "git push origin HEAD"
 popd
 
+
 ###########################################################################
 # Adds repo to argocd to trust  https://my-git.io/gitea_admin/clusteraddons
 ###########################################################################
 pe "argocd repo add  --insecure-skip-server-verification https://my-git.io/gitea_admin/clusteraddons.git"
 
 
-
 ##################
-# Deploy guestbook 
+# Deploy guestbook
 ##################
 log::info "Deploying the guesbook-ingress to remote clusters"
 cat <<EOF |  kubectl --context $(get_client_context_from_cluster_name ${MGMT})  apply  -f -
@@ -274,3 +253,18 @@ EOF
 done
 
 pe "argocd --core=true cluster list"
+
+#######################################################################
+# Now deploy syncrets since it has to find the ingress (for the moment)
+#######################################################################
+log::info "Deploying syncrets"
+#SYNCRETSDIR=$(mktemp -d /tmp/syncrets.XXXX)
+#git clone https://github.com/sdminonne/syncrets.git ${SYNCRETSDIR}
+SYNCRETSDIR=~/dev/sdminonne/syncrets/src/github.com/sdminonne/syncrets/
+pushd ${SYNCRETSDIR}
+make build
+make image
+make CLUSTER=${MGMT} push-image
+kubectl --context $(get_client_context_from_cluster_name ${MGMT}) apply  -f ${SYNCRETSDIR}/deployment/syncrets.yaml
+popd
+wait_until "all_pods_in_namespace_for_context_are_running cert-manager  $(get_client_context_from_cluster_name ${MGMT})" 10 120

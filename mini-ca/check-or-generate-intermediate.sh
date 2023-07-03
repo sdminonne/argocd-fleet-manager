@@ -63,10 +63,10 @@ organizationalUnitName	= argo
 commonName              = Intermediate CA
 
 [policy_server_cert]
-countryName             = optional
-stateOrProvinceName     = optional
-localityName            = optional
-organizationName        = optional
+countryName             = match
+stateOrProvinceName     = match
+localityName            = match
+organizationName        = match
 organizationalUnitName  = optional
 commonName              = supplied
 emailAddress            = optional
