@@ -59,7 +59,7 @@ GITEANS=gitea
 log::info "Creating a GIT server on ${MGMT} cluster using helm charts for GITEA see https://gitea.io/en-us"
 pe "helm --kube-context $(get_client_context_from_cluster_name ${MGMT}) install gitea gitea-charts/gitea  --namespace ${GITEANS} --create-namespace"
 log::info "Adding ingress to gitea (cert-manager generates the certificate)"
-cat <<EOF | kubectl --context $(get_client_context_from_cluster_name ${MGMT}) -n ${GITEANS} apply  -f -
+cat << EOF | kubectl --context $(get_client_context_from_cluster_name ${MGMT}) -n ${GITEANS} apply  -f -
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -148,66 +148,34 @@ curl  -u 'gitea_admin:r8sA8CPHD9!bt6d' \
 CLUSTERADDONSTMP=$(mktemp -d)/clusteraddons
 mkdir -p ${CLUSTERADDONSTMP}
 git init ${CLUSTERADDONSTMP}
-pe "cp  -r ${ROOTDIR}/manifests/guestbook ${CLUSTERADDONSTMP}"
+#pe "cp -r ${ROOTDIR}/manifests/guestbook ${CLUSTERADDONSTMP}"
+pe "cp -r  ${ROOTDIR}/manifests/prometheus ${CLUSTERADDONSTMP}"
 pushd ${CLUSTERADDONSTMP}
 git remote add origin 'https://gitea_admin:r8sA8CPHD9!bt6d'@my-git.io/gitea_admin/clusteraddons.git
-pe "git add ${CLUSTERADDONSTMP}/guestbook"
-pe "git commit -s -a -m 'To add guestbook'"
+pe "git add ${CLUSTERADDONSTMP}/prometheus"
+
+pe "git commit -s -a -m 'To add guestbook and prometheus'"
 pe "git push origin HEAD"
 popd
-
 
 ###########################################################################
 # Adds repo to argocd to trust  https://my-git.io/gitea_admin/clusteraddons
 ###########################################################################
 pe "argocd repo add  --insecure-skip-server-verification https://my-git.io/gitea_admin/clusteraddons.git"
 
-
 ##################
 # Deploy guestbook
 ##################
-log::info "Deploying the guesbook-ingress to remote clusters"
-cat <<EOF |  kubectl --context $(get_client_context_from_cluster_name ${MGMT})  apply  -f -
-apiVersion: argoproj.io/v1alpha1
-kind: ApplicationSet
-metadata:
-  name: guestbook
-spec:
-  generators:
-  - clusters:
-      selector:
-        matchExpressions:
-        - key: argocd.argoproj.io/secret-type
-          operator: In
-          values:
-          - "cluster"
-  template:
-    metadata:
-      name: guestbook
-    spec:
-      project: default
-      source:
-        repoURL: https://my-git.io/gitea_admin/clusteraddons.git
-        targetRevision: HEAD
-        path: "guestbook"
-        helm:
-          releaseName: guestbook
-          parameters:
-          - name: host
-            value: '{{name}}'
-          - name: secret
-            value: '{{name}}-tls'
-      destination:
-        server: '{{server}}'
-        namespace: guestbook
-      syncPolicy:
-        automated:
-          prune: true
-          selfHeal: true
-        syncOptions:
-          - CreateNamespace=true
-EOF
+#log::info "Deploying the guesbook-ingress to remote clusters"
+#pe "cat manifests/guestbook-appset.yaml"
+#pe "kubectl --context $(get_client_context_from_cluster_name ${MGMT})  apply  -f manifests/guestbook-appset.yaml"
 
+##################
+# Deploy prometheus
+##################
+log::info "Deploying the guesbook-ingress to remote clusters"
+pe "cat manifests/prometheus-appset.yaml"
+pe "kubectl --context $(get_client_context_from_cluster_name ${MGMT})  apply  -f manifests/prometheus-appset.yaml"
 
 
 ##############################################
@@ -217,7 +185,8 @@ pe "argocd --core=true cluster list"
 for mc in "${managedclusters[@]}"; do
     pe "kubectl --context $(get_client_context_from_cluster_name ${mc}) config view --minify --flatten > ${mc}.kubeconfig"
     pe "argocd --core=true cluster add ${mc} --kubeconfig= ${mc}.kubeconfig -y"
-cat <<EOF | kubectl --context $(get_client_context_from_cluster_name ${MGMT}) apply  -f -
+    TMPCERTMANIFEST=$(mktemp -t "${mc}.XXXX.certificate.yaml")
+    cat << EOF > ${TMPCERTMANIFEST}
 apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
@@ -250,6 +219,9 @@ spec:
     kind: ClusterIssuer
     group: cert-manager.io
 EOF
+pe cat "${TMPCERTMANIFEST}"
+pe "kubectl --context $(get_client_context_from_cluster_name ${MGMT}) apply  -f ${TMPCERTMANIFEST}"
+
 done
 
 pe "argocd --core=true cluster list"
@@ -258,9 +230,9 @@ pe "argocd --core=true cluster list"
 # Now deploy syncrets since it has to find the ingress (for the moment)
 #######################################################################
 log::info "Deploying syncrets"
-#SYNCRETSDIR=$(mktemp -d /tmp/syncrets.XXXX)
-#git clone https://github.com/sdminonne/syncrets.git ${SYNCRETSDIR}
-SYNCRETSDIR=~/dev/sdminonne/syncrets/src/github.com/sdminonne/syncrets/
+SYNCRETSDIR=$(mktemp -d /tmp/syncrets.XXXX)
+git clone https://github.com/sdminonne/syncrets.git ${SYNCRETSDIR}
+#SYNCRETSDIR=~/dev/sdminonne/syncrets/src/github.com/sdminonne/syncrets/
 pushd ${SYNCRETSDIR}
 make build
 make image

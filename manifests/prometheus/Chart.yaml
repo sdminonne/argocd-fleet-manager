@@ -1,0 +1,5 @@
+apiVersion: v2
+name: prometheus
+description: A Helm chart to deploy Guesbook Ingress to remote clusters
+version: 0.9.0
+appVersion: "1.0"

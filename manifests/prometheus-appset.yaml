@@ -1,0 +1,38 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: prometheus
+spec:
+  generators:
+  - clusters:
+      selector:
+        matchExpressions:
+        - key: argocd.argoproj.io/secret-type
+          operator: In
+          values:
+          - "cluster"
+  template:
+    metadata:
+      name: prometheus
+    spec:
+      project: default
+      source:
+        repoURL: https://my-git.io/gitea_admin/clusteraddons.git
+        targetRevision: HEAD
+        path: "prometheus"
+        helm:
+          releaseName: prometheus
+          parameters:
+          - name: host
+            value: '{{name}}'
+          - name: secret
+            value: '{{name}}-tls'
+      destination:
+        server: '{{server}}'
+        namespace: monitoring
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=true

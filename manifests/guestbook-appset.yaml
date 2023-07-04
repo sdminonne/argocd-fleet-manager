@@ -1,0 +1,38 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: guestbook
+spec:
+  generators:
+  - clusters:
+      selector:
+        matchExpressions:
+        - key: argocd.argoproj.io/secret-type
+          operator: In
+          values:
+          - "cluster"
+  template:
+    metadata:
+      name: guestbook
+    spec:
+      project: default
+      source:
+        repoURL: https://my-git.io/gitea_admin/clusteraddons.git
+        targetRevision: HEAD
+        path: "guestbook"
+        helm:
+          releaseName: guestbook
+          parameters:
+          - name: host
+            value: '{{name}}'
+          - name: secret
+            value: '{{name}}-tls'
+      destination:
+        server: '{{server}}'
+        namespace: guestbook
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=true
